@@ -44,11 +44,24 @@ def run(config: AppConfig | None = None) -> None:
     sent_count = 0
     for event in events:
         directives = parse_directives(event.description)
+        if directives:
+            _log.info(
+                "Event '%s' at %s has %d SMS directive(s)",
+                event.summary,
+                event.start,
+                len(directives),
+            )
         for directive in directives:
             send_time = event.start - directive.offset
             instance_start = event.start.isoformat()
 
             if not (send_time <= now < event.start):
+                _log.debug(
+                    "Not yet time for %s (send at %s, now %s)",
+                    directive.phone_number,
+                    send_time,
+                    now,
+                )
                 continue
 
             if not store.should_send(
