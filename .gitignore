@@ -3,6 +3,9 @@ credentials.json
 token.json
 config.toml
 
+# Runtime data
+*.db
+
 # Python
 __pycache__/
 *.py[cod]
