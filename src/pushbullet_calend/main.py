@@ -1,0 +1,93 @@
+"""Main entry point — poll calendars and send due SMS messages."""
+
+import logging
+from datetime import UTC, datetime
+
+from pushbullet_calend.calendar_client import fetch_events
+from pushbullet_calend.config import AppConfig, load_config
+from pushbullet_calend.db import SentStore
+from pushbullet_calend.parser import parse_directives
+from pushbullet_calend.sender import SendError, notify_failure, send_sms
+
+_log = logging.getLogger(__name__)
+
+
+def _configure_logging() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
+
+def run(config: AppConfig | None = None) -> None:
+    """Single poll cycle: fetch events, send any due SMS messages."""
+    if config is None:
+        config = load_config()
+
+    store = SentStore(config.database.path)
+    now = datetime.now(UTC)
+
+    try:
+        events = fetch_events(config.google, lookahead_days=config.schedule.lookahead_days)
+    except Exception:
+        _log.exception("Failed to fetch calendar events")
+        notify_failure(
+            config.pushbullet,
+            "Calendar fetch failed",
+            "Could not retrieve events from Google Calendar. Check logs for details.",
+        )
+        return
+
+    sent_count = 0
+    for event in events:
+        directives = parse_directives(event.description)
+        for directive in directives:
+            send_time = event.start - directive.offset
+            instance_start = event.start.isoformat()
+
+            if not (send_time <= now < event.start):
+                continue
+
+            if store.was_sent(
+                event.event_id,
+                instance_start,
+                directive.phone_number,
+                directive.message,
+            ):
+                continue
+
+            try:
+                send_sms(config.pushbullet, directive.phone_number, directive.message)
+                store.record_sent(
+                    event.event_id,
+                    instance_start,
+                    directive.phone_number,
+                    directive.message,
+                )
+                sent_count += 1
+            except SendError as exc:
+                _log.error("SMS failed: %s", exc)
+                store.record_sent(
+                    event.event_id,
+                    instance_start,
+                    directive.phone_number,
+                    directive.message,
+                    status="failed",
+                )
+                notify_failure(
+                    config.pushbullet,
+                    f"SMS to {directive.phone_number} failed",
+                    f"Event: {event.summary}\nMessage: {directive.message}\nError: {exc}",
+                )
+
+    _log.info("Poll complete: %d messages sent", sent_count)
+    store.close()
+
+
+def main() -> None:
+    _configure_logging()
+    run()
+
+
+if __name__ == "__main__":
+    main()
