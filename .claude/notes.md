@@ -20,6 +20,13 @@
 - Device iden: `GET /v2/devices` with Access-Token header
 - Pro required for >100 SMS/month
 
+## Future Optimization
+
+Daemon uses ~100MB RAM. Main culprits:
+- google-api-python-client (~40-50MB): loads full API discovery doc. Could replace with raw requests — we only use one endpoint. Biggest win.
+- SQLAlchemy (~15-20MB): full ORM for one table. Could drop back to raw sqlite3.
+- Alternative: switch to cron instead of daemon — memory goes to zero between runs, trade-off is ~5 min timing imprecision.
+
 ## Google Calendar API
 
 - OAuth2 for personal calendar access
