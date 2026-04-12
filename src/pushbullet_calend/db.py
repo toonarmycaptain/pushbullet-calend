@@ -1,7 +1,7 @@
 """SQLite storage for tracking sent SMS messages."""
 
 import hashlib
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import String, UniqueConstraint, create_engine, select
@@ -91,7 +91,7 @@ class SentStore:
                         instance_start=instance_start,
                         phone_number=phone_number,
                         message_hash=message_hash(message),
-                        sent_at=datetime.now(timezone.utc).isoformat(),
+                        sent_at=datetime.now(UTC).isoformat(),
                         status=status,
                     )
                 )
