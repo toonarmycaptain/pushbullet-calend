@@ -5,6 +5,7 @@ config.toml
 
 # Runtime data
 *.db
+*.log
 
 # Python
 __pycache__/
