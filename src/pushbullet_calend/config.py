@@ -24,6 +24,7 @@ class PushbulletConfig:
 @dataclass
 class ScheduleConfig:
     lookahead_days: int = 7
+    poll_interval_minutes: int = 5
 
 
 @dataclass
