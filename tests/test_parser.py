@@ -43,10 +43,10 @@ _FOOTBALL_MSG = "Football practice starts at 5"
             f"SMS: -2d | +61498765432 | {_FOOTBALL_MSG}",
             [directive(days=2, phone="+61498765432", message=_FOOTBALL_MSG)],
         ),
-        # Phone number without '+' prefix
+        # Phone number without '+' prefix gets +1 prepended
         (
-            "SMS: -15m | 61412345678 | Meeting in 15 minutes",
-            [directive(minutes=15, phone="61412345678", message="Meeting in 15 minutes")],
+            "SMS: -15m | 8175551234 | Meeting in 15 minutes",
+            [directive(minutes=15, phone="+18175551234", message="Meeting in 15 minutes")],
         ),
     ],
 )

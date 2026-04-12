@@ -32,6 +32,8 @@ def parse_directives(description: str) -> list[SmsDirective]:
     for match in _DIRECTIVE_RE.finditer(description):
         amount_str, unit, phone, message = match.groups()
         offset = timedelta(**{_UNIT_TO_TIMEDELTA[unit]: int(amount_str)})
+        if not phone.startswith("+"):
+            phone = f"+1{phone}"
         directives.append(
             SmsDirective(
                 offset=offset,
