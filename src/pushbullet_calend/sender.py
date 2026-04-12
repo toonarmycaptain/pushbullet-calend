@@ -7,7 +7,7 @@ import requests
 
 from pushbullet_calend.config import PushbulletConfig
 
-_log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 _API_BASE = "https://api.pushbullet.com/v2"
 _MAX_RETRIES = 3
@@ -63,7 +63,7 @@ def _request_with_retry(
             last_exc = exc
             if attempt < max_retries - 1:
                 wait = _BACKOFF_BASE ** (attempt + 1)
-                _log.warning(
+                logger.warning(
                     "Request to %s failed (attempt %d/%d), retrying in %ds: %s",
                     url,
                     attempt + 1,
@@ -99,7 +99,7 @@ def send_sms(
         headers=_headers(config),
         json=payload,
     )
-    _log.info("SMS sent to %s", phone_number)
+    logger.info("SMS sent to %s", phone_number)
 
 
 def notify_failure(
@@ -120,6 +120,6 @@ def notify_failure(
             headers=_headers(config),
             json=payload,
         )
-        _log.info("Failure notification sent: %s", title)
+        logger.info("Failure notification sent: %s", title)
     except (TransientError, PermanentError):
-        _log.exception("Could not send failure notification: %s — %s", title, body)
+        logger.exception("Could not send failure notification: %s — %s", title, body)

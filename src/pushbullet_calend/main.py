@@ -9,10 +9,10 @@ from pushbullet_calend.db import SentStore
 from pushbullet_calend.parser import parse_directives
 from pushbullet_calend.sender import PermanentError, TransientError, notify_failure, send_sms
 
-_log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
-def _configure_logging() -> None:
+def _configureloggerging() -> None:
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
@@ -33,7 +33,7 @@ def run(config: AppConfig | None = None) -> None:
             lookahead_days=config.schedule.lookahead_days,
         )
     except Exception:
-        _log.exception("Failed to fetch calendar events")
+        logger.exception("Failed to fetch calendar events")
         notify_failure(
             config.pushbullet,
             "Calendar fetch failed",
@@ -45,7 +45,7 @@ def run(config: AppConfig | None = None) -> None:
     for event in events:
         directives = parse_directives(event.description)
         if directives:
-            _log.info(
+            logger.info(
                 "Event '%s' at %s has %d SMS directive(s)",
                 event.summary,
                 event.start,
@@ -56,7 +56,7 @@ def run(config: AppConfig | None = None) -> None:
             instance_start = event.start.isoformat()
 
             if not (send_time <= now < event.start):
-                _log.debug(
+                logger.debug(
                     "Not yet time for %s (send at %s, now %s)",
                     directive.phone_number,
                     send_time,
@@ -88,13 +88,13 @@ def run(config: AppConfig | None = None) -> None:
             except TransientError as exc:
                 # Network/server issue — don't record, just skip this cycle.
                 # The message will be retried on the next poll.
-                _log.warning(
+                logger.warning(
                     "Transient error sending to %s, will retry next cycle: %s",
                     directive.phone_number,
                     exc,
                 )
             except PermanentError as exc:
-                _log.error("Permanent send failure to %s: %s", directive.phone_number, exc)
+                logger.error("Permanent send failure to %s: %s", directive.phone_number, exc)
                 retries = store.record_failure(
                     event.event_id,
                     instance_start,
@@ -107,12 +107,12 @@ def run(config: AppConfig | None = None) -> None:
                     f"Event: {event.summary}\nMessage: {directive.message}\nError: {exc}",
                 )
 
-    _log.info("Poll complete: %d messages sent", sent_count)
+    logger.info("Poll complete: %d messages sent", sent_count)
     store.close()
 
 
 def main() -> None:
-    _configure_logging()
+    _configureloggerging()
     run()
 
 

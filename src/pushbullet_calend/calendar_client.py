@@ -13,7 +13,7 @@ from googleapiclient.discovery import build
 from pushbullet_calend.config import GoogleConfig
 
 _SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
-_log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -57,7 +57,7 @@ def fetch_events(
 
     events: list[CalendarEvent] = []
     for calendar_id in config.calendar_ids:
-        _log.info("Fetching events from calendar %s", calendar_id)
+        logger.info("Fetching events from calendar %s", calendar_id)
         page_token = None
         while True:
             result = (
@@ -87,5 +87,5 @@ def fetch_events(
             if not page_token:
                 break
 
-    _log.info("Fetched %d events across %d calendars", len(events), len(config.calendar_ids))
+    logger.info("Fetched %d events across %d calendars", len(events), len(config.calendar_ids))
     return events

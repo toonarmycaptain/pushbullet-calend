@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass
 from datetime import timedelta
 
-_log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 _DIRECTIVE_RE = re.compile(
     r"^SMS:\s*-(\d+)([mhd])\s*\|\s*(\+?[\d\s\-.()+]+)\s*\|\s*(.+)$",
@@ -44,7 +44,7 @@ def parse_directives(description: str) -> list[SmsDirective]:
         amount_str, unit, phone_raw, message = match.groups()
         offset = timedelta(**{_UNIT_TO_TIMEDELTA[unit]: int(amount_str)})
         phone = _normalize_phone(phone_raw)
-        _log.debug("Parsed directive: -%s%s to %s", amount_str, unit, phone)
+        logger.debug("Parsed directive: -%s%s to %s", amount_str, unit, phone)
         directives.append(
             SmsDirective(
                 offset=offset,
@@ -53,5 +53,5 @@ def parse_directives(description: str) -> list[SmsDirective]:
             )
         )
     if not directives:
-        _log.debug("No SMS directives found in description")
+        logger.debug("No SMS directives found in description")
     return directives
