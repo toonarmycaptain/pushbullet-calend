@@ -4,7 +4,7 @@ Automatically send SMS reminders based on Google Calendar events. Add a simple d
 
 ## How it works
 
-A script polls your Google Calendar every few minutes, looking for events with SMS directives in their descriptions. When it's time to send, it uses the Pushbullet API to send an SMS from your phone.
+A daemon polls your Google Calendar every few minutes, looking for events with SMS directives in their descriptions. It calculates the exact time each message should be sent and sleeps until that moment, then uses the Pushbullet API to send an SMS from your phone.
 
 ## Reminder syntax
 
@@ -19,26 +19,46 @@ Where `<time>` is how long before the event to send, using `m` (minutes), `h` (h
 ### Examples
 
 ```
-SMS: -30m | +61412345678 | Hey, can you pick up the kids from school at 3:15?
-SMS: -1h | +61412345678 | Dinner at 7 tonight, don't forget!
-SMS: -2d | +61498765432 | Football practice is on Thursday at 5pm
+SMS: -30m | 817-555-1234 | Hey, can you pick up the kids from school at 3:15?
+SMS: -1h | (817) 555-1234 | Dinner at 7 tonight, don't forget!
+SMS: -2d | 8175559876 | Football practice is on Thursday at 5pm
 ```
 
 You can have multiple SMS lines in a single event — each one is sent independently:
 
 ```
-SMS: -1d | +61412345678 | Reminder: school pickup tomorrow at 3:15
-SMS: -30m | +61412345678 | Heading to pick up the kids now?
-SMS: -1h | +61498765432 | Don't forget about tomorrow's event!
+SMS: -1d | 817-555-1234 | Reminder: school pickup tomorrow at 3:15
+SMS: -30m | 817-555-1234 | Heading to pick up the kids now?
+SMS: -1h | 817-555-9876 | Don't forget about tomorrow's event!
 ```
 
 The message text is everything after the last `|`, so your messages can contain pipe characters if needed.
 
+### Phone numbers
+
+Numbers without a `+` country code prefix are assumed to be US numbers and get `+1` prepended automatically. All formatting (dashes, spaces, dots, parentheses) is stripped.
+
+These are all equivalent:
+
+```
+817-555-1234      → +18175551234
+(817) 555-1234    → +18175551234
+817.555.1234      → +18175551234
+8175551234        → +18175551234
++18175551234      → +18175551234
+```
+
+For international numbers, include the `+` and country code:
+
+```
+SMS: -1h | +44 7911 123456 | Don't forget the meeting!
+```
+
 ### Timing
 
-The directive `-30m` means "30 minutes before the event starts". The message will be sent on the first poll cycle after that time arrives, as long as the event hasn't started yet.
+The directive `-30m` means "30 minutes before the event starts". In daemon mode, the message is sent at the exact scheduled time. In one-shot mode, it's sent on the first run after that time arrives, as long as the event hasn't started yet.
 
-This means you can add a `-12h` directive to a 7pm event and it will send at 7am — even if you add the directive after 7am, it'll send on the next poll cycle.
+This means you can add a `-12h` directive to a 7pm event and it will send at 7am — even if you add the directive after 7am, it'll send on the next poll or run.
 
 For recurring events, each occurrence is handled independently — you set it up once and every instance gets its own reminder.
 
@@ -65,9 +85,14 @@ uv sync
 1. Go to [Google Cloud Console](https://console.cloud.google.com/)
 2. Create a project (or use an existing one)
 3. Go to **APIs & Services > Library**, search for "Google Calendar API", and enable it
-4. Go to **APIs & Services > Credentials > Create Credentials > OAuth client ID**
-5. Choose **Desktop app**, then download the JSON file
-6. Save it as `credentials.json` in the project root
+4. Go to **APIs & Services > OAuth consent screen**, configure it:
+   - Choose **External** user type
+   - Fill in app name and email (required fields only)
+   - Add scope: `https://www.googleapis.com/auth/calendar.readonly`
+   - Add your Google email as a **test user**
+5. Go to **APIs & Services > Credentials > Create Credentials > OAuth client ID**
+6. Choose **Desktop app**, then download the JSON file
+7. Save it as `credentials.json` in the project root
 
 ### 3. Pushbullet API key
 
@@ -102,6 +127,7 @@ device_iden = "your_device_iden_here"
 
 [schedule]
 lookahead_days = 7
+poll_interval_minutes = 5
 
 [database]
 path = "sent_messages.db"
@@ -119,11 +145,38 @@ calendar_ids = ["primary", "family@group.calendar.google.com"]
 uv run pushbullet-calend
 ```
 
-A browser window will open asking you to authorize calendar access. After approving, a `token.json` file is saved so you won't be asked again.
+A browser window will open asking you to authorize calendar access. You'll see a "Google hasn't verified this app" warning — click **Advanced** > **Go to pushbullet-calend (unsafe)** to proceed. After approving, a `token.json` file is saved so you won't be asked again.
 
-### 6. Schedule with cron
+## Running
 
-Run every 5 minutes:
+### One-shot mode
+
+Runs a single poll cycle and exits. Useful for testing or running via cron.
+
+```bash
+uv run pushbullet-calend
+```
+
+### Daemon mode (recommended)
+
+Runs continuously in the background. Polls the calendar every 5 minutes (configurable) and sends messages at the exact scheduled time.
+
+```bash
+# Run in the foreground (Ctrl+C to stop)
+uv run pushbullet-calend --daemon
+
+# Run in the background, detached from your terminal
+nohup uv run pushbullet-calend --daemon >> pushbullet-calend.log 2>&1 &
+
+# Stop the background daemon
+pkill -f "pushbullet-calend --daemon"
+```
+
+The daemon responds to `SIGINT` and `SIGTERM` for clean shutdown.
+
+### Cron (alternative to daemon)
+
+If you prefer cron over a daemon, messages will be sent within 5 minutes of the scheduled time (depending on your cron interval):
 
 ```bash
 crontab -e
@@ -132,14 +185,14 @@ crontab -e
 Add:
 
 ```
-*/5 * * * * cd /path/to/pushbullet-calend && uv run pushbullet-calend
+*/5 * * * * cd /path/to/pushbullet-calend && /path/to/pushbullet-calend/.venv/bin/python -m pushbullet_calend >> pushbullet-calend.log 2>&1
 ```
 
 ## Error handling
 
-- **Network outages / server errors** — the script silently skips and retries on the next poll cycle. Your internet can be down for hours and messages will send when it comes back.
-- **Application errors** (bad phone number, invalid API key, etc.) — recorded as failed, retried up to 5 times. You'll get a Pushbullet push notification on your phone about the failure.
-- **If push notifications also fail** — errors are logged to stderr.
+- **Network outages / server errors (5xx)** — silently skipped and retried on the next cycle. Your internet can be down for hours and messages will send when it comes back. These do not count against the retry limit.
+- **Application errors (4xx)** (bad phone number, invalid API key, etc.) — recorded as failed, retried up to 5 times. You'll get a Pushbullet push notification on your phone about the failure.
+- **If push notifications also fail** — errors are logged to stderr/log file.
 
 ## Deduplication
 
@@ -150,12 +203,16 @@ This means:
 - If you edit the message text in the event description, it'll send the updated version
 - Different phone numbers in the same event each get their own message
 
+## Disclaimer
+
+This is a personal tool built for individual use. It is not affiliated with or endorsed by Google or Pushbullet. Use at your own risk. No warranty is provided, express or implied. You are responsible for your own API usage, message content, and compliance with applicable terms of service.
+
 ## Development
 
 ```bash
 uv sync
-uv run pytest                # run tests
-uv run ruff check src/ tests/  # lint
+uv run pytest                   # run tests
+uv run ruff check src/ tests/   # lint
 uv run ruff format src/ tests/  # format
 ```
 

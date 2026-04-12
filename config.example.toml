@@ -9,6 +9,7 @@ device_iden = "your_device_iden_here"
 
 [schedule]
 lookahead_days = 7
+poll_interval_minutes = 5
 
 [database]
 path = "sent_messages.db"
