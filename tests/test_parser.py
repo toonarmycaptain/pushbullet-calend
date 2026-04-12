@@ -158,6 +158,30 @@ def test_message_with_pipe_characters():
 
 
 # ---------------------------------------------------------------------------
+# Phone number normalization
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "raw_number, expected_phone",
+    [
+        ("+18175551234", "+18175551234"),
+        ("8175551234", "+18175551234"),
+        ("817-555-1234", "+18175551234"),
+        ("(817) 555-1234", "+18175551234"),
+        ("817.555.1234", "+18175551234"),
+        ("+44 7911 123456", "+447911123456"),
+    ],
+    ids=["international", "bare", "dashes", "parens", "dots", "intl_spaces"],
+)
+def test_phone_normalization(raw_number, expected_phone):
+    description = f"SMS: -5m | {raw_number} | msg"
+    result = parse_directives(description)
+    assert len(result) == 1
+    assert result[0].phone_number == expected_phone
+
+
+# ---------------------------------------------------------------------------
 # Offset field correctness
 # ---------------------------------------------------------------------------
 
