@@ -1,0 +1,14 @@
+[google]
+calendar_ids = ["primary"]
+credentials_file = "credentials.json"
+token_file = "token.json"
+
+[pushbullet]
+api_key = "o.your_api_key_here"
+device_iden = "your_device_iden_here"
+
+[schedule]
+lookahead_days = 7
+
+[database]
+path = "sent_messages.db"
