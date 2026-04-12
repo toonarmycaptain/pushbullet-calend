@@ -7,7 +7,7 @@ from pushbullet_calend.calendar_client import fetch_events
 from pushbullet_calend.config import AppConfig, load_config
 from pushbullet_calend.db import SentStore
 from pushbullet_calend.parser import parse_directives
-from pushbullet_calend.sender import SendError, notify_failure, send_sms
+from pushbullet_calend.sender import PermanentError, TransientError, notify_failure, send_sms
 
 _log = logging.getLogger(__name__)
 
@@ -28,13 +28,16 @@ def run(config: AppConfig | None = None) -> None:
     now = datetime.now(UTC)
 
     try:
-        events = fetch_events(config.google, lookahead_days=config.schedule.lookahead_days)
+        events = fetch_events(
+            config.google,
+            lookahead_days=config.schedule.lookahead_days,
+        )
     except Exception:
         _log.exception("Failed to fetch calendar events")
         notify_failure(
             config.pushbullet,
             "Calendar fetch failed",
-            "Could not retrieve events from Google Calendar. Check logs for details.",
+            "Could not retrieve events from Google Calendar. Check logs.",
         )
         return
 
@@ -48,7 +51,7 @@ def run(config: AppConfig | None = None) -> None:
             if not (send_time <= now < event.start):
                 continue
 
-            if store.was_sent(
+            if not store.should_send(
                 event.event_id,
                 instance_start,
                 directive.phone_number,
@@ -57,7 +60,11 @@ def run(config: AppConfig | None = None) -> None:
                 continue
 
             try:
-                send_sms(config.pushbullet, directive.phone_number, directive.message)
+                send_sms(
+                    config.pushbullet,
+                    directive.phone_number,
+                    directive.message,
+                )
                 store.record_sent(
                     event.event_id,
                     instance_start,
@@ -65,18 +72,25 @@ def run(config: AppConfig | None = None) -> None:
                     directive.message,
                 )
                 sent_count += 1
-            except SendError as exc:
-                _log.error("SMS failed: %s", exc)
-                store.record_sent(
+            except TransientError as exc:
+                # Network/server issue — don't record, just skip this cycle.
+                # The message will be retried on the next poll.
+                _log.warning(
+                    "Transient error sending to %s, will retry next cycle: %s",
+                    directive.phone_number,
+                    exc,
+                )
+            except PermanentError as exc:
+                _log.error("Permanent send failure to %s: %s", directive.phone_number, exc)
+                retries = store.record_failure(
                     event.event_id,
                     instance_start,
                     directive.phone_number,
                     directive.message,
-                    status="failed",
                 )
                 notify_failure(
                     config.pushbullet,
-                    f"SMS to {directive.phone_number} failed",
+                    f"SMS to {directive.phone_number} failed ({retries}x)",
                     f"Event: {event.summary}\nMessage: {directive.message}\nError: {exc}",
                 )
 
