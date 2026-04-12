@@ -14,8 +14,12 @@ _MAX_RETRIES = 3
 _BACKOFF_BASE = 2  # seconds
 
 
-class SendError(Exception):
-    """Raised when an SMS fails after all retries."""
+class TransientError(Exception):
+    """Network/server issue — safe to retry on next poll cycle."""
+
+
+class PermanentError(Exception):
+    """Application-level failure (4xx) — retrying won't help without a fix."""
 
 
 def _headers(config: PushbulletConfig) -> dict[str, str]:
@@ -23,6 +27,15 @@ def _headers(config: PushbulletConfig) -> dict[str, str]:
         "Access-Token": config.api_key,
         "Content-Type": "application/json",
     }
+
+
+def _is_transient(exc: requests.RequestException) -> bool:
+    """Return True if the error is likely transient (network or server-side)."""
+    if isinstance(exc, (requests.ConnectionError, requests.Timeout)):
+        return True
+    if isinstance(exc, requests.HTTPError) and exc.response is not None:
+        return exc.response.status_code >= 500
+    return False
 
 
 def _request_with_retry(
@@ -33,14 +46,20 @@ def _request_with_retry(
     json: dict,
     max_retries: int = _MAX_RETRIES,
 ) -> requests.Response:
-    """Make an HTTP request with exponential backoff on failure."""
-    last_exc: Exception | None = None
+    """Make an HTTP request with exponential backoff on transient failures.
+
+    Raises TransientError for network/5xx issues after retries are exhausted.
+    Raises PermanentError immediately for 4xx responses.
+    """
+    last_exc: requests.RequestException | None = None
     for attempt in range(max_retries):
         try:
             resp = requests.request(method, url, headers=headers, json=json, timeout=30)
             resp.raise_for_status()
             return resp
         except requests.RequestException as exc:
+            if not _is_transient(exc):
+                raise PermanentError(str(exc)) from exc
             last_exc = exc
             if attempt < max_retries - 1:
                 wait = _BACKOFF_BASE ** (attempt + 1)
@@ -53,7 +72,7 @@ def _request_with_retry(
                     exc,
                 )
                 time.sleep(wait)
-    raise last_exc  # type: ignore[misc]
+    raise TransientError(str(last_exc)) from last_exc
 
 
 def send_sms(
@@ -61,7 +80,11 @@ def send_sms(
     phone_number: str,
     message: str,
 ) -> None:
-    """Send an SMS via Pushbullet. Raises SendError on failure."""
+    """Send an SMS via Pushbullet.
+
+    Raises TransientError for network/server issues.
+    Raises PermanentError for application-level failures.
+    """
     payload = {
         "data": {
             "addresses": [phone_number],
@@ -70,16 +93,13 @@ def send_sms(
             "body": message,
         },
     }
-    try:
-        _request_with_retry(
-            "POST",
-            f"{_API_BASE}/texts",
-            headers=_headers(config),
-            json=payload,
-        )
-        _log.info("SMS sent to %s", phone_number)
-    except requests.RequestException as exc:
-        raise SendError(f"Failed to send SMS to {phone_number}: {exc}") from exc
+    _request_with_retry(
+        "POST",
+        f"{_API_BASE}/texts",
+        headers=_headers(config),
+        json=payload,
+    )
+    _log.info("SMS sent to %s", phone_number)
 
 
 def notify_failure(
@@ -101,5 +121,5 @@ def notify_failure(
             json=payload,
         )
         _log.info("Failure notification sent: %s", title)
-    except requests.RequestException:
+    except (TransientError, PermanentError):
         _log.exception("Could not send failure notification: %s — %s", title, body)
