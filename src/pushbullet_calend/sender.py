@@ -90,7 +90,7 @@ def send_sms(
             "addresses": [phone_number],
             "guid": f"sms-{phone_number}-{hash(message)}",
             "target_device_iden": config.device_iden,
-            "body": message,
+            "message": message,
         },
     }
     _request_with_retry(
