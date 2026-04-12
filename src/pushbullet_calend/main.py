@@ -63,15 +63,66 @@ def _collect_pending(
     return pending
 
 
-def _send_due(pending: list[PendingSms], config: AppConfig, store: SentStore) -> int:
-    """Send any messages whose send_time has arrived. Returns count sent."""
-    now = datetime.now(UTC)
-    sent_count = 0
-    for item in pending:
-        if not (item.send_time <= now < item.event.start):
-            continue
+def _send_due(
+    pending: list[PendingSms],
+    config: AppConfig,
+    store: SentStore,
+    *,
+    verify: bool = False,
+) -> int:
+    """Send any messages whose send_time has arrived. Returns count sent.
 
+    If verify is True, re-fetch events from the calendar before sending
+    to confirm they haven't been cancelled or moved.
+    """
+    now = datetime.now(UTC)
+    due = [item for item in pending if item.send_time <= now < item.event.start]
+
+    if not due:
+        return 0
+
+    # Re-fetch events to verify they still exist and haven't changed
+    if verify:
+        try:
+            fresh_events = fetch_events(
+                config.google,
+                lookahead_days=config.schedule.lookahead_days,
+            )
+            # Build a set of (event_id, start_iso, description) for quick lookup
+            fresh_lookup = {(e.event_id, e.start.isoformat()): e.description for e in fresh_events}
+        except Exception:
+            logger.exception("Failed to verify events before sending, skipping this cycle")
+            return 0
+
+    sent_count = 0
+    for item in due:
         instance_start = item.event.start.isoformat()
+
+        if verify:
+            fresh_desc = fresh_lookup.get((item.event.event_id, instance_start))
+            if fresh_desc is None:
+                logger.info(
+                    "Event '%s' at %s no longer exists, skipping SMS to %s",
+                    item.event.summary,
+                    item.event.start,
+                    item.directive.phone_number,
+                )
+                continue
+            # Re-parse and check the directive is still present
+            fresh_directives = parse_directives(fresh_desc)
+            still_valid = any(
+                d.phone_number == item.directive.phone_number
+                and d.message == item.directive.message
+                for d in fresh_directives
+            )
+            if not still_valid:
+                logger.info(
+                    "SMS directive for %s in event '%s' was removed or changed, skipping",
+                    item.directive.phone_number,
+                    item.event.summary,
+                )
+                continue
+
         try:
             send_sms(config.pushbullet, item.directive.phone_number, item.directive.message)
             store.record_sent(
@@ -176,8 +227,8 @@ def run_daemon(config: AppConfig | None = None) -> None:
                 )
             next_poll = now + poll_interval
 
-        # Send anything that's due right now
-        sent_count = _send_due(pending, config, store)
+        # Send anything that's due — verify against live calendar data first
+        sent_count = _send_due(pending, config, store, verify=True)
         if sent_count:
             logger.info("Sent %d messages", sent_count)
             # Re-collect to remove sent items
