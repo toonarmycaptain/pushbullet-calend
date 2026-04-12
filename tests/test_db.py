@@ -7,7 +7,7 @@ from pushbullet_calend.db import SentStore, message_hash
 
 @pytest.fixture
 def store(tmp_path):
-    s = SentStore(tmp_path / "test.db")
+    s = SentStore(tmp_path / "test.db", max_retries=3)
     yield s
     s.close()
 
@@ -28,17 +28,17 @@ class TestMessageHash:
         assert (message_hash(text_a) == message_hash(text_b)) is should_match
 
 
-class TestSentStore:
-    def test_not_sent_initially(self, store):
-        assert not store.was_sent(*_EVENT, "Pick up the kids")
+class TestShouldSend:
+    def test_new_message_should_send(self, store):
+        assert store.should_send(*_EVENT, "Pick up the kids")
 
-    def test_was_sent_after_recording(self, store):
+    def test_sent_message_should_not_send(self, store):
         store.record_sent(*_EVENT, "Pick up the kids")
-        assert store.was_sent(*_EVENT, "Pick up the kids")
+        assert not store.should_send(*_EVENT, "Pick up the kids")
 
-    def test_different_message_not_marked_sent(self, store):
+    def test_different_message_should_send(self, store):
         store.record_sent(*_EVENT, "Pick up the kids")
-        assert not store.was_sent(*_EVENT, "Different message")
+        assert store.should_send(*_EVENT, "Different message")
 
     @pytest.mark.parametrize(
         "varied_event",
@@ -49,15 +49,36 @@ class TestSentStore:
         ],
         ids=["different_event_id", "different_instance", "different_phone"],
     )
-    def test_different_dedup_key_not_marked_sent(self, store, varied_event):
+    def test_different_dedup_key_should_send(self, store, varied_event):
         store.record_sent(*_EVENT, "Same message")
-        assert not store.was_sent(*varied_event, "Same message")
+        assert store.should_send(*varied_event, "Same message")
 
-    def test_duplicate_record_is_ignored(self, store):
+    def test_failed_message_should_retry(self, store):
+        store.record_failure(*_EVENT, "msg")
+        assert store.should_send(*_EVENT, "msg")
+
+    def test_exhausted_retries_should_not_send(self, store):
+        for _ in range(3):
+            store.record_failure(*_EVENT, "msg")
+        assert not store.should_send(*_EVENT, "msg")
+
+
+class TestRecordFailure:
+    def test_first_failure_returns_1(self, store):
+        assert store.record_failure(*_EVENT, "msg") == 1
+
+    def test_increments_retry_count(self, store):
+        store.record_failure(*_EVENT, "msg")
+        assert store.record_failure(*_EVENT, "msg") == 2
+
+    def test_success_after_failure(self, store):
+        store.record_failure(*_EVENT, "msg")
+        store.record_sent(*_EVENT, "msg")
+        assert not store.should_send(*_EVENT, "msg")
+
+
+class TestRecordSent:
+    def test_duplicate_record_is_idempotent(self, store):
         store.record_sent(*_EVENT, "msg")
         store.record_sent(*_EVENT, "msg")  # should not raise
-        assert store.was_sent(*_EVENT, "msg")
-
-    def test_failed_status_still_counts_as_sent(self, store):
-        store.record_sent(*_EVENT, "msg", status="failed")
-        assert store.was_sent(*_EVENT, "msg")
+        assert not store.should_send(*_EVENT, "msg")
