@@ -8,7 +8,8 @@ from datetime import UTC, datetime, timedelta
 
 from pushbullet_calend.calendar_client import CalendarEvent, fetch_events
 from pushbullet_calend.config import AppConfig, load_config
-from pushbullet_calend.db import SentStore
+from pushbullet_calend.db import EmailNotificationStore, SentStore
+from pushbullet_calend.email_monitor import check_email
 from pushbullet_calend.parser import SmsDirective, parse_directives
 from pushbullet_calend.sender import PermanentError, TransientError, notify_failure, send_sms
 
@@ -179,6 +180,14 @@ def run_once(config: AppConfig | None = None) -> None:
     logger.info("Poll complete: %d messages sent", sent_count)
     store.close()
 
+    # Check email watches
+    if config.email_watch.enabled:
+        email_store = EmailNotificationStore(config.database.path)
+        email_sent = check_email(config, email_store)
+        if email_sent:
+            logger.info("Email watch: %d SMS alerts sent", email_sent)
+        email_store.close()
+
 
 def run_daemon(config: AppConfig | None = None) -> None:
     """Run as a background daemon, polling and sleeping until exact send times."""
@@ -197,6 +206,9 @@ def run_daemon(config: AppConfig | None = None) -> None:
 
     poll_interval = timedelta(minutes=config.schedule.poll_interval_minutes)
     store = SentStore(config.database.path)
+    email_store = (
+        EmailNotificationStore(config.database.path) if config.email_watch.enabled else None
+    )
     logger.info("Daemon started, polling every %s", poll_interval)
 
     pending: list[PendingSms] = []
@@ -225,6 +237,15 @@ def run_daemon(config: AppConfig | None = None) -> None:
                     "Calendar fetch failed",
                     "Could not retrieve events from Google Calendar. Check logs.",
                 )
+            # Check email watches during each poll
+            if email_store is not None:
+                try:
+                    email_sent = check_email(config, email_store)
+                    if email_sent:
+                        logger.info("Email watch: %d SMS alerts sent", email_sent)
+                except Exception:
+                    logger.exception("Failed to check email")
+
             next_poll = now + poll_interval
 
         # Send anything that's due — verify against live calendar data first
@@ -262,6 +283,84 @@ def run_daemon(config: AppConfig | None = None) -> None:
 
     logger.info("Daemon stopped")
     store.close()
+    if email_store is not None:
+        email_store.close()
+
+
+def _encrypt_password() -> None:
+    """Interactive: encrypt a password and print the token for config.toml."""
+    import getpass
+
+    from pushbullet_calend.crypto import _DEFAULT_KEY_PATH, encrypt, generate_key, load_key
+
+    if _DEFAULT_KEY_PATH.exists():
+        key = load_key()
+        print(f"Using existing key at {_DEFAULT_KEY_PATH}")
+    else:
+        key = generate_key()
+        print(f"Generated new key at {_DEFAULT_KEY_PATH}")
+
+    password = getpass.getpass("Enter the email password to encrypt: ")
+    token = encrypt(password, key)
+    print(f'\nPut this in your config.toml as app_password:\n\n  app_password = "{token}"\n')
+
+
+def _test_email() -> None:
+    """Test IMAP login and search without sending any SMS."""
+    import email as email_mod
+    import imaplib
+    from email.header import decode_header
+
+    config = load_config()
+    ew = config.email_watch
+
+    if not ew.enabled:
+        print("email_watch is not enabled in config.toml")
+        return
+
+    print(f"Connecting to {ew.imap_server} as {ew.email_address}...")
+    try:
+        conn = imaplib.IMAP4_SSL(ew.imap_server)
+        conn.login(ew.email_address, ew.app_password)
+        print("Login successful!")
+    except Exception as exc:
+        print(f"Login FAILED: {exc}")
+        return
+
+    try:
+        conn.select("INBOX", readonly=True)
+        for rule in ew.rules:
+            print(f'\nSearching for subject: "{rule.subject}"')
+            ascii_words = rule.subject.encode("ascii", errors="replace").decode()
+            runs = [r.strip() for r in ascii_words.split("?") if r.strip()]
+            search_term = max(runs, key=len) if runs else rule.subject
+            from datetime import timedelta
+
+            since_date = (datetime.now(UTC) - timedelta(hours=12)).strftime("%d-%b-%Y")
+            status, data = conn.search(None, "SUBJECT", f'"{search_term}"', "SINCE", since_date)
+            if status != "OK" or not data[0]:
+                print("  No matching emails found.")
+                continue
+            uids = data[0].split()
+            print(f"  Found {len(uids)} matching email(s):")
+            for uid in uids[:5]:  # Show at most 5
+                status, msg_data = conn.fetch(uid, "(RFC822.HEADER)")
+                if status == "OK":
+                    msg = email_mod.message_from_bytes(msg_data[0][1])
+                    raw_subj = msg.get("Subject", "")
+                    parts = decode_header(raw_subj)
+                    subject = "".join(
+                        p.decode(c or "utf-8", errors="replace") if isinstance(p, bytes) else p
+                        for p, c in parts
+                    )
+                    print(f"    UID {uid.decode()}: {subject}")
+            if len(uids) > 5:
+                print(f"    ... and {len(uids) - 5} more")
+    finally:
+        conn.close()
+        conn.logout()
+
+    print("\nEmail check test complete. No SMS was sent.")
 
 
 def main() -> None:
@@ -273,11 +372,25 @@ def main() -> None:
         action="store_true",
         help="Run as background daemon",
     )
+    parser.add_argument(
+        "--encrypt-password",
+        action="store_true",
+        help="Encrypt a password for config.toml",
+    )
+    parser.add_argument(
+        "--test-email",
+        action="store_true",
+        help="Test email login and search without sending SMS",
+    )
     args = parser.parse_args()
 
     _configure_logging()
 
-    if args.daemon:
+    if args.encrypt_password:
+        _encrypt_password()
+    elif args.test_email:
+        _test_email()
+    elif args.daemon:
         run_daemon()
     else:
         run_once()

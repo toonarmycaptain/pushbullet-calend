@@ -14,6 +14,24 @@ class Base(DeclarativeBase):
     pass
 
 
+class NotifiedEmail(Base):
+    __tablename__ = "notified_emails"
+    __table_args__ = (
+        UniqueConstraint(
+            "email_account",
+            "email_uid",
+            "rule_subject",
+            name="uq_email_dedup",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    email_account: Mapped[str] = mapped_column(String, nullable=False)
+    email_uid: Mapped[str] = mapped_column(String, nullable=False)
+    rule_subject: Mapped[str] = mapped_column(String, nullable=False)
+    notified_at: Mapped[str] = mapped_column(String, nullable=False)
+
+
 class SentMessage(Base):
     __tablename__ = "sent_messages"
     __table_args__ = (
@@ -151,3 +169,49 @@ class SentStore:
             row.sent_at = datetime.now(UTC).isoformat()
             session.commit()
             return row.retry_count
+
+
+class EmailNotificationStore:
+    """Tracks which email UIDs have already triggered an SMS notification."""
+
+    def __init__(self, db_path: str | Path) -> None:
+        self._engine = create_engine(f"sqlite:///{db_path}")
+        Base.metadata.create_all(self._engine)
+
+    def close(self) -> None:
+        self._engine.dispose()
+
+    def should_notify(
+        self,
+        email_account: str,
+        email_uid: str,
+        rule_subject: str,
+    ) -> bool:
+        """Return True if this email UID hasn't been notified yet."""
+        with Session(self._engine) as session:
+            row = session.execute(
+                select(NotifiedEmail).where(
+                    NotifiedEmail.email_account == email_account,
+                    NotifiedEmail.email_uid == email_uid,
+                    NotifiedEmail.rule_subject == rule_subject,
+                )
+            ).scalar_one_or_none()
+            return row is None
+
+    def record_notified(
+        self,
+        email_account: str,
+        email_uid: str,
+        rule_subject: str,
+    ) -> None:
+        """Record that we sent a notification for this email."""
+        with Session(self._engine) as session:
+            session.add(
+                NotifiedEmail(
+                    email_account=email_account,
+                    email_uid=email_uid,
+                    rule_subject=rule_subject,
+                    notified_at=datetime.now(UTC).isoformat(),
+                )
+            )
+            session.commit()

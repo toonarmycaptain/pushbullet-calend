@@ -1,6 +1,6 @@
 # pushbullet-calend
 
-Automatically send SMS reminders based on Google Calendar events. Add a simple directive to any event description and the system handles the rest — including recurring events.
+Automatically send SMS reminders based on Google Calendar events, and get texted when specific emails arrive. Add a simple directive to any event description and the system handles the rest — including recurring events.
 
 ## How it works
 
@@ -133,6 +133,8 @@ poll_interval_minutes = 5
 path = "sent_messages.db"
 ```
 
+See the [Email watch](#email-watch) section below for the optional `[email_watch]` config.
+
 To monitor multiple calendars, add their IDs to the list:
 
 ```toml
@@ -187,6 +189,49 @@ Add:
 ```
 */5 * * * * cd /path/to/pushbullet-calend && /path/to/pushbullet-calend/.venv/bin/python -m pushbullet_calend >> pushbullet-calend.log 2>&1
 ```
+
+## Email watch
+
+In addition to calendar reminders, you can monitor an email inbox and get an SMS when a matching email arrives. This is useful for time-sensitive alerts like sales, shipping notifications, etc.
+
+### Configuration
+
+Add an `[email_watch]` section to your `config.toml`:
+
+```toml
+[email_watch]
+enabled = true
+imap_server = "imap.gmail.com"            # or "outlook.office365.com" for Hotmail/Outlook
+email_address = "you@gmail.com"
+app_password = "<encrypted — see below>"
+
+[[email_watch.rules]]
+subject = "Your order has shipped!"
+phone_number = "817-555-1234"
+message = "Shipping notification just arrived!"
+```
+
+You can add multiple `[[email_watch.rules]]` blocks. Each rule matches on exact subject and sends to its own phone number.
+
+### Encrypting your email password
+
+Email passwords are stored encrypted in the config file. To set one up:
+
+```bash
+uv run pushbullet-calend --encrypt-password
+```
+
+This generates an encryption key at `~/.pushbullet-calend.key` (or reuses an existing one) and prints an encrypted token to paste into your `config.toml` as `app_password`.
+
+For Gmail, you'll need an [App Password](https://myaccount.google.com/apppasswords) (requires 2FA enabled). For Outlook/Hotmail, use your regular password or an app password if 2FA is on.
+
+### Testing your email setup
+
+```bash
+uv run pushbullet-calend --test-email
+```
+
+This connects to your inbox, searches for matching subjects, and shows what it finds — without sending any SMS.
 
 ## Error handling
 
