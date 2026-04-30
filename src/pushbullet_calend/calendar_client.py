@@ -33,8 +33,12 @@ def _authenticate(config: GoogleConfig) -> Credentials:
         creds = Credentials.from_authorized_user_file(str(token_path), _SCOPES)
 
     if creds and creds.expired and creds.refresh_token:
-        creds.refresh(Request())
-    elif not creds or not creds.valid:
+        try:
+            creds.refresh(Request())
+        except Exception:
+            logger.warning("Token refresh failed; re-authenticating")
+            creds = None
+    if not creds or not creds.valid:
         flow = InstalledAppFlow.from_client_secrets_file(config.credentials_file, _SCOPES)
         creds = flow.run_local_server(port=0)
 
