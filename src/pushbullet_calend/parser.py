@@ -1,11 +1,14 @@
 """Parse SMS directives from Google Calendar event descriptions."""
 
+import html
 import logging
 import re
 from dataclasses import dataclass
 from datetime import timedelta
 
 logger = logging.getLogger(__name__)
+
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 _DIRECTIVE_RE = re.compile(
     r"^SMS:\s*-(\d+)([mhd])\s*\|\s*(\+?[\d\s\-.()+]+)\s*\|\s*(.+)$",
@@ -34,11 +37,18 @@ class SmsDirective:
     message: str
 
 
+def _strip_html(text: str) -> str:
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
+    text = _HTML_TAG_RE.sub("", text)
+    return html.unescape(text)
+
+
 def parse_directives(description: str) -> list[SmsDirective]:
     """Return all SMS directives found in *description*.
 
     Lines not matching the SMS directive syntax are silently ignored.
     """
+    description = _strip_html(description)
     directives: list[SmsDirective] = []
     for match in _DIRECTIVE_RE.finditer(description):
         amount_str, unit, phone_raw, message = match.groups()
