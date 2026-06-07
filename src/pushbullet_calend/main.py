@@ -155,16 +155,22 @@ def _send_due(
     return sent_count
 
 
-def run_once(config: AppConfig | None = None) -> None:
-    """Single poll cycle: fetch events, send any due SMS messages."""
-    if config is None:
-        config = load_config()
-
-    store = SentStore(config.database.path)
+def _poll(
+    config: AppConfig,
+    store: SentStore,
+    email_store: EmailNotificationStore | None,
+) -> list[PendingSms]:
+    """Fetch calendar events and check email watches. Returns pending SMS list."""
     try:
         events = fetch_events(
             config.google,
             lookahead_days=config.schedule.lookahead_days,
+        )
+        pending = _collect_pending(events, store)
+        logger.info(
+            "Polled calendar: %d events, %d pending SMS",
+            len(events),
+            len(pending),
         )
     except Exception:
         logger.exception("Failed to fetch calendar events")
@@ -173,26 +179,43 @@ def run_once(config: AppConfig | None = None) -> None:
             "Calendar fetch failed",
             "Could not retrieve events from Google Calendar. Check logs.",
         )
-        return
-
-    pending = _collect_pending(events, store)
-    sent_count = _send_due(pending, config, store)
-    logger.info("Poll complete: %d messages sent", sent_count)
-    store.close()
-
+        return []
     # Check email watches
-    if config.email_watch.enabled:
-        email_store = EmailNotificationStore(config.database.path)
-        email_sent = check_email(config, email_store)
-        if email_sent:
-            logger.info("Email watch: %d SMS alerts sent", email_sent)
-        email_store.close()
+    if email_store is not None:
+        try:
+            email_sent = check_email(config, email_store)
+            if email_sent:
+                logger.info("Email watch: %d SMS alerts sent", email_sent)
+        except Exception:
+            logger.exception("Failed to check email")
+
+    return pending
 
 
-def run_daemon(config: AppConfig | None = None) -> None:
-    """Run as a background daemon, polling and sleeping until exact send times."""
+def run(config: AppConfig | None = None, *, daemon: bool = False) -> None:
+    """
+    Run a single poll cycle, or as a background daemon.
+
+    By default, fetches events, sends any due SMS, and exits.
+    With daemon=True, run as a background daemon, looping continuously — re-polling on a schedule
+    and sleeping until the next send time.
+    """
     if config is None:
         config = load_config()
+
+    store = SentStore(config.database.path)
+    email_store = (
+        EmailNotificationStore(config.database.path) if config.email_watch.enabled else None
+    )
+
+    if not daemon:
+        pending = _poll(config, store, email_store)
+        sent_count = _send_due(pending, config, store)
+        logger.info("Poll complete: %d messages sent", sent_count)
+        store.close()
+        if email_store is not None:
+            email_store.close()
+        return
 
     running = True
 
@@ -205,10 +228,6 @@ def run_daemon(config: AppConfig | None = None) -> None:
     signal.signal(signal.SIGTERM, _handle_signal)
 
     poll_interval = timedelta(minutes=config.schedule.poll_interval_minutes)
-    store = SentStore(config.database.path)
-    email_store = (
-        EmailNotificationStore(config.database.path) if config.email_watch.enabled else None
-    )
     logger.info("Daemon started, polling every %s", poll_interval)
 
     pending: list[PendingSms] = []
@@ -219,33 +238,7 @@ def run_daemon(config: AppConfig | None = None) -> None:
 
         # Time to re-poll the calendar?
         if now >= next_poll:
-            try:
-                events = fetch_events(
-                    config.google,
-                    lookahead_days=config.schedule.lookahead_days,
-                )
-                pending = _collect_pending(events, store)
-                logger.info(
-                    "Polled calendar: %d events, %d pending SMS",
-                    len(events),
-                    len(pending),
-                )
-            except Exception:
-                logger.exception("Failed to fetch calendar events")
-                notify_failure(
-                    config.pushbullet,
-                    "Calendar fetch failed",
-                    "Could not retrieve events from Google Calendar. Check logs.",
-                )
-            # Check email watches during each poll
-            if email_store is not None:
-                try:
-                    email_sent = check_email(config, email_store)
-                    if email_sent:
-                        logger.info("Email watch: %d SMS alerts sent", email_sent)
-                except Exception:
-                    logger.exception("Failed to check email")
-
+            pending = _poll(config, store, email_store)
             next_poll = now + poll_interval
 
         # Send anything that's due — verify against live calendar data first
@@ -391,9 +384,9 @@ def main() -> None:
     elif args.test_email:
         _test_email()
     elif args.daemon:
-        run_daemon()
+        run(daemon=True)
     else:
-        run_once()
+        run()
 
 
 if __name__ == "__main__":
