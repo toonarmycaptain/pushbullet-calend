@@ -26,5 +26,18 @@ app_password = "your_app_password_here"
 
 [[email_watch.rules]]
 subject = "It's here… free product time!"
-phone_number = "817-555-1234"
+phone_number = "555-555-0123"
 message = "Free product email just arrived! Go go go!"
+
+# Match on sender only — any email from this address triggers the alert
+[[email_watch.rules]]
+sender = "alerts@example.com"
+phone_number = "555-555-0123"
+message = "Got an email from alerts!"
+
+# Match on both — the email must be from this sender AND have this exact subject
+[[email_watch.rules]]
+subject = "Your order has shipped!"
+sender = "shipping@example.com"
+phone_number = "555-555-0123"
+message = "Shipping notification from Example!"

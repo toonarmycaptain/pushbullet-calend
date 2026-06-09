@@ -1,0 +1,34 @@
+# Example systemd unit for running pushbullet-calend as a daemon.
+# See "systemd service" in README.md.
+#
+# Copy it first:
+#   cp pushbullet-calend.example.service pushbullet-calend.service
+#
+# Then, in the copy, replace the two placeholder paths below (systemd needs absolute paths):
+#   WorkingDirectory: the directory containing your config.toml. The credentials, token
+#     and database paths in config.toml are relative to it.
+#   ExecStart: the pushbullet-calend command from the environment it's installed in.
+#     Find it with `which pushbullet-calend` while that environment is active, or
+#     `uv run which pushbullet-calend` in a uv checkout.
+#
+# User service:   cp pushbullet-calend.service ~/.config/systemd/user/
+# System service: sudo cp pushbullet-calend.service /etc/systemd/system/
+#                 and make the two changes marked "System service" below.
+
+[Unit]
+Description=Pushbullet Calendar SMS Reminders
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# System service: uncomment and set the user to run as.
+#User=youruser
+WorkingDirectory=/path/to/config-dir
+ExecStart=/path/to/env/bin/pushbullet-calend --daemon
+Restart=on-failure
+RestartSec=30
+
+[Install]
+# System service: change to multi-user.target.
+WantedBy=default.target

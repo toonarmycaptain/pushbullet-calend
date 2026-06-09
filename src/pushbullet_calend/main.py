@@ -302,7 +302,12 @@ def _test_email() -> None:
     """Test IMAP login and search without sending any SMS."""
     import email as email_mod
     import imaplib
-    from email.header import decode_header
+
+    from pushbullet_calend.email_monitor import (
+        _build_search_criteria,
+        _decode_header,
+        _matches_rule,
+    )
 
     config = load_config()
     ew = config.email_watch
@@ -323,32 +328,37 @@ def _test_email() -> None:
     try:
         conn.select("INBOX", readonly=True)
         for rule in ew.rules:
-            print(f'\nSearching for subject: "{rule.subject}"')
-            ascii_words = rule.subject.encode("ascii", errors="replace").decode()
-            runs = [r.strip() for r in ascii_words.split("?") if r.strip()]
-            search_term = max(runs, key=len) if runs else rule.subject
+            match_desc = []
+            if rule.subject:
+                match_desc.append(f'subject: "{rule.subject}"')
+            if rule.sender:
+                match_desc.append(f'sender: "{rule.sender}"')
+            print(f"\nSearching for {', '.join(match_desc)}")
+
             from datetime import timedelta
 
             since_date = (datetime.now(UTC) - timedelta(hours=12)).strftime("%d-%b-%Y")
-            status, data = conn.search(None, "SUBJECT", f'"{search_term}"', "SINCE", since_date)
+            criteria = _build_search_criteria(rule, since_date)
+            status, data = conn.search(None, *criteria)
             if status != "OK" or not data[0]:
                 print("  No matching emails found.")
                 continue
             uids = data[0].split()
-            print(f"  Found {len(uids)} matching email(s):")
-            for uid in uids[:5]:  # Show at most 5
+            print(f"  Found {len(uids)} candidate email(s):")
+            exact_count = 0
+            for uid in uids[:10]:
                 status, msg_data = conn.fetch(uid, "(RFC822.HEADER)")
                 if status == "OK":
                     msg = email_mod.message_from_bytes(msg_data[0][1])
-                    raw_subj = msg.get("Subject", "")
-                    parts = decode_header(raw_subj)
-                    subject = "".join(
-                        p.decode(c or "utf-8", errors="replace") if isinstance(p, bytes) else p
-                        for p, c in parts
-                    )
-                    print(f"    UID {uid.decode()}: {subject}")
-            if len(uids) > 5:
-                print(f"    ... and {len(uids) - 5} more")
+                    subject = _decode_header(msg, "Subject")
+                    sender = _decode_header(msg, "From")
+                    exact = _matches_rule(msg, rule)
+                    exact_count += exact
+                    marker = "MATCH" if exact else "skip"
+                    print(f"    [{marker}] UID {uid.decode()}: {subject} (from: {sender})")
+            if len(uids) > 10:
+                print(f"    ... and {len(uids) - 10} more")
+            print(f"  Exact matches: {exact_count}")
     finally:
         conn.close()
         conn.logout()

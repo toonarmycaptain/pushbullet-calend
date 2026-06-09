@@ -45,8 +45,8 @@ _FOOTBALL_MSG = "Football practice starts at 5"
         ),
         # Phone number without '+' prefix gets +1 prepended
         (
-            "SMS: -15m | 8175551234 | Meeting in 15 minutes",
-            [directive(minutes=15, phone="+18175551234", message="Meeting in 15 minutes")],
+            "SMS: -15m | 5555550123 | Meeting in 15 minutes",
+            [directive(minutes=15, phone="+15555550123", message="Meeting in 15 minutes")],
         ),
     ],
 )
@@ -165,11 +165,11 @@ def test_message_with_pipe_characters():
 @pytest.mark.parametrize(
     "raw_number, expected_phone",
     [
-        ("+18175551234", "+18175551234"),
-        ("8175551234", "+18175551234"),
-        ("817-555-1234", "+18175551234"),
-        ("(817) 555-1234", "+18175551234"),
-        ("817.555.1234", "+18175551234"),
+        ("+15555550123", "+15555550123"),
+        ("5555550123", "+15555550123"),
+        ("555-555-0123", "+15555550123"),
+        ("(555) 555-0123", "+15555550123"),
+        ("555.555.0123", "+15555550123"),
         ("+44 7911 123456", "+447911123456"),
     ],
     ids=["international", "bare", "dashes", "parens", "dots", "intl_spaces"],
