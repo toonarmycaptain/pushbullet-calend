@@ -40,6 +40,7 @@ class DatabaseConfig:
 @dataclass
 class EmailWatchRule:
     subject: str = ""
+    sender: str = ""
     phone_number: str = ""
     message: str = ""
 

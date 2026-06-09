@@ -19,17 +19,17 @@ Where `<time>` is how long before the event to send, using `m` (minutes), `h` (h
 ### Examples
 
 ```
-SMS: -30m | 817-555-1234 | Hey, can you pick up the kids from school at 3:15?
-SMS: -1h | (817) 555-1234 | Dinner at 7 tonight, don't forget!
-SMS: -2d | 8175559876 | Football practice is on Thursday at 5pm
+SMS: -30m | 555-555-0123 | Hey, can you pick up the kids from school at 3:15?
+SMS: -1h | (555) 555-0123 | Dinner at 7 tonight, don't forget!
+SMS: -2d | 5555550199 | Football practice is on Thursday at 5pm
 ```
 
 You can have multiple SMS lines in a single event — each one is sent independently:
 
 ```
-SMS: -1d | 817-555-1234 | Reminder: school pickup tomorrow at 3:15
-SMS: -30m | 817-555-1234 | Heading to pick up the kids now?
-SMS: -1h | 817-555-9876 | Don't forget about tomorrow's event!
+SMS: -1d | 555-555-0123 | Reminder: school pickup tomorrow at 3:15
+SMS: -30m | 555-555-0123 | Heading to pick up the kids now?
+SMS: -1h | 555-555-0199 | Don't forget about tomorrow's event!
 ```
 
 The message text is everything after the last `|`, so your messages can contain pipe characters if needed.
@@ -41,11 +41,11 @@ Numbers without a `+` country code prefix are assumed to be US numbers and get `
 These are all equivalent:
 
 ```
-817-555-1234      → +18175551234
-(817) 555-1234    → +18175551234
-817.555.1234      → +18175551234
-8175551234        → +18175551234
-+18175551234      → +18175551234
+555-555-0123      → +15555550123
+(555) 555-0123    → +15555550123
+555.555.0123      → +15555550123
+5555550123        → +15555550123
++15555550123      → +15555550123
 ```
 
 For international numbers, include the `+` and country code:
@@ -190,6 +190,58 @@ Add:
 */5 * * * * cd /path/to/pushbullet-calend && /path/to/pushbullet-calend/.venv/bin/python -m pushbullet_calend >> pushbullet-calend.log 2>&1
 ```
 
+### systemd service (recommended for Linux)
+
+A `pushbullet-calend.service` file is included in the repo. Edit it to set the correct paths for `WorkingDirectory` and `ExecStart`, then install it.
+
+**As a user service** (no root required):
+
+```bash
+cp pushbullet-calend.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable pushbullet-calend
+systemctl --user start pushbullet-calend
+
+# Check status / logs
+systemctl --user status pushbullet-calend
+journalctl --user -u pushbullet-calend -f
+```
+
+User services run only while you're logged in. To keep it running after logout:
+
+```bash
+loginctl enable-linger $USER
+```
+
+**As a system service** (runs at boot, requires root):
+
+```bash
+sudo cp pushbullet-calend.service /etc/systemd/system/
+```
+
+Edit the installed copy to add a `User=` line under `[Service]`, and change `WantedBy=` to `multi-user.target`:
+
+```ini
+[Service]
+User=youruser
+...
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Then:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable pushbullet-calend
+sudo systemctl start pushbullet-calend
+
+# Check status / logs
+sudo systemctl status pushbullet-calend
+journalctl -u pushbullet-calend -f
+```
+
 ## Email watch
 
 In addition to calendar reminders, you can monitor an email inbox and get an SMS when a matching email arrives. This is useful for time-sensitive alerts like sales, shipping notifications, etc.
@@ -207,11 +259,32 @@ app_password = "<encrypted — see below>"
 
 [[email_watch.rules]]
 subject = "Your order has shipped!"
-phone_number = "817-555-1234"
+phone_number = "555-555-0123"
 message = "Shipping notification just arrived!"
 ```
 
-You can add multiple `[[email_watch.rules]]` blocks. Each rule matches on exact subject and sends to its own phone number.
+You can add multiple `[[email_watch.rules]]` blocks. Each rule needs at least a `subject` or `sender` (or both):
+
+- **Subject only** — matches emails with that exact subject line.
+- **Sender only** — matches any email from that address (substring match on the From header).
+- **Both** — the email must match both criteria (AND logic).
+
+For OR logic (match subject *or* sender), use two separate rules.
+
+```toml
+# Match on sender only
+[[email_watch.rules]]
+sender = "alerts@example.com"
+phone_number = "555-555-0123"
+message = "Got an email from alerts!"
+
+# Match on both sender AND subject
+[[email_watch.rules]]
+subject = "Your order has shipped!"
+sender = "shipping@example.com"
+phone_number = "555-555-0123"
+message = "Shipping notification from Example!"
+```
 
 ### Encrypting your email password
 
