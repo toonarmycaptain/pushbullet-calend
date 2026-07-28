@@ -10,6 +10,9 @@ device_iden = "your_device_iden_here"
 [schedule]
 lookahead_days = 7
 poll_interval_minutes = 5
+# Optional, doubles from initial fetch_retry_delay_seconds for fetch_retries attempts, defaulting to 5 and 5.
+fetch_retries = 5
+fetch_retry_delay_seconds = 5
 
 [database]
 path = "sent_messages.db"
