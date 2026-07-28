@@ -1,6 +1,7 @@
 """Google Calendar API client for fetching events."""
 
 import logging
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -93,3 +94,31 @@ def fetch_events(
 
     logger.info("Fetched %d events across %d calendars", len(events), len(config.calendar_ids))
     return events
+
+
+def fetch_events_with_retry(
+    config: GoogleConfig,
+    *,
+    lookahead_days: int = 7,
+    retries: int = 5,
+    retry_delay_seconds: int = 5,
+) -> list[CalendarEvent]:
+    """Fetch events, retrying failures with a doubling delay (5s, 10s, 20s, 40s, 80s).
+
+    Raises the final exception once all attempts are exhausted.
+    """
+    delay = retry_delay_seconds
+    for attempt in range(1, retries + 1):
+        try:
+            return fetch_events(config, lookahead_days=lookahead_days)
+        except Exception as exc:
+            logger.warning(
+                "Calendar fetch failed (attempt %d/%d), retrying in %.0fs: %s",
+                attempt,
+                retries + 1,
+                delay,
+                exc,
+            )
+            time.sleep(delay)
+            delay *= 2
+    return fetch_events(config, lookahead_days=lookahead_days)

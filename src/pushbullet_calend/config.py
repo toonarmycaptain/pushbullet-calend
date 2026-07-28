@@ -30,6 +30,8 @@ class PushbulletConfig:
 class ScheduleConfig:
     lookahead_days: int = 7
     poll_interval_minutes: int = 5
+    fetch_retries: int = 5
+    fetch_retry_delay_seconds: int = 5
 
 
 @dataclass

@@ -6,7 +6,7 @@ import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from pushbullet_calend.calendar_client import CalendarEvent, fetch_events
+from pushbullet_calend.calendar_client import CalendarEvent, fetch_events_with_retry
 from pushbullet_calend.config import AppConfig, load_config
 from pushbullet_calend.db import EmailNotificationStore, SentStore
 from pushbullet_calend.email_monitor import check_email
@@ -85,9 +85,11 @@ def _send_due(
     # Re-fetch events to verify they still exist and haven't changed
     if verify:
         try:
-            fresh_events = fetch_events(
+            fresh_events = fetch_events_with_retry(
                 config.google,
                 lookahead_days=config.schedule.lookahead_days,
+                retries=config.schedule.fetch_retries,
+                retry_delay_seconds=config.schedule.fetch_retry_delay_seconds,
             )
             # Build a set of (event_id, start_iso, description) for quick lookup
             fresh_lookup = {(e.event_id, e.start.isoformat()): e.description for e in fresh_events}
@@ -159,12 +161,18 @@ def _poll(
     config: AppConfig,
     store: SentStore,
     email_store: EmailNotificationStore | None,
-) -> list[PendingSms]:
-    """Fetch calendar events and check email watches. Returns pending SMS list."""
+) -> list[PendingSms] | None:
+    """Fetch calendar events and check email watches. Returns pending SMS list.
+
+    Returns None if the calendar fetch failed, so callers can keep a
+    previously collected pending list instead of discarding it.
+    """
     try:
-        events = fetch_events(
+        events = fetch_events_with_retry(
             config.google,
             lookahead_days=config.schedule.lookahead_days,
+            retries=config.schedule.fetch_retries,
+            retry_delay_seconds=config.schedule.fetch_retry_delay_seconds,
         )
         pending = _collect_pending(events, store)
         logger.info(
@@ -179,7 +187,7 @@ def _poll(
             "Calendar fetch failed",
             "Could not retrieve events from Google Calendar. Check logs.",
         )
-        return []
+        return None
     # Check email watches
     if email_store is not None:
         try:
@@ -210,7 +218,7 @@ def run(config: AppConfig | None = None, *, daemon: bool = False) -> None:
 
     if not daemon:
         pending = _poll(config, store, email_store)
-        sent_count = _send_due(pending, config, store)
+        sent_count = _send_due(pending or [], config, store)
         logger.info("Poll complete: %d messages sent", sent_count)
         store.close()
         if email_store is not None:
@@ -238,7 +246,14 @@ def run(config: AppConfig | None = None, *, daemon: bool = False) -> None:
 
         # Time to re-poll the calendar?
         if now >= next_poll:
-            pending = _poll(config, store, email_store)
+            fresh = _poll(config, store, email_store)
+            if fresh is not None:
+                pending = fresh
+            else:
+                logger.warning(
+                    "Poll failed; keeping %d previously pending SMS until next poll",
+                    len(pending),
+                )
             next_poll = now + poll_interval
 
         # Send anything that's due — verify against live calendar data first
