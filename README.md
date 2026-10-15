@@ -62,6 +62,8 @@ This means you can add a `-12h` directive to a 7pm event and it will send at 7am
 
 For recurring events, each occurrence is handled independently — you set it up once and every instance gets its own reminder.
 
+All-day events (birthdays, holidays) start at midnight in the calendar's time zone, so `-5h` texts at 7pm the night before.
+
 ## Prerequisites
 
 - Python 3.14+

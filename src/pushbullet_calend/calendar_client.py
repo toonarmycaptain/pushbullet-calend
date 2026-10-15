@@ -5,6 +5,7 @@ import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -47,6 +48,19 @@ def _authenticate(config: GoogleConfig) -> Credentials:
     return creds
 
 
+def _event_start(start: dict[str, str], calendar_tz: str | None) -> datetime:
+    """Return an event's start as an aware datetime.
+
+    All-day events only have a date, so they start at midnight in the event's
+    (or calendar's) time zone.
+    """
+    if "dateTime" in start:
+        return datetime.fromisoformat(start["dateTime"])
+    midnight = datetime.fromisoformat(start["date"])
+    tz_name = start.get("timeZone") or calendar_tz
+    return midnight.replace(tzinfo=ZoneInfo(tz_name)) if tz_name else midnight.astimezone()
+
+
 def fetch_events(
     config: GoogleConfig,
     *,
@@ -78,14 +92,14 @@ def fetch_events(
                 .execute()
             )
             for item in result.get("items", []):
-                start_raw = item["start"].get("dateTime") or item["start"].get("date")
-                start = datetime.fromisoformat(start_raw)
                 events.append(
                     CalendarEvent(
                         event_id=item["id"],
                         summary=item.get("summary", ""),
                         description=item.get("description", ""),
-                        start=start,
+                        start=_event_start(
+                            start=item["start"], calendar_tz=result.get("timeZone")
+                        ),
                     )
                 )
             page_token = result.get("nextPageToken")

@@ -130,6 +130,51 @@ def test_fetch_events_parses_items(monkeypatch, item, expected):
     assert fetch_events(_CONFIG) == [expected]
 
 
+@pytest.mark.parametrize(
+    "response, expected_start",
+    [
+        (
+            {
+                "timeZone": "Australia/Brisbane",
+                "items": [{"id": "bday", "start": {"date": "2026-11-03"}}],
+            },
+            "2026-11-03T00:00:00+10:00",
+        ),
+        (
+            {
+                "timeZone": "America/Chicago",
+                "items": [{"id": "bday", "start": {"date": "2026-11-03"}}],
+            },
+            "2026-11-03T00:00:00-06:00",
+        ),
+        (
+            {
+                "timeZone": "Australia/Brisbane",
+                "items": [
+                    {"id": "bday", "start": {"date": "2026-11-03", "timeZone": "Europe/London"}}
+                ],
+            },
+            "2026-11-03T00:00:00+00:00",
+        ),
+        (
+            {"items": [{"id": "bday", "start": {"date": "2026-11-03"}}]},
+            datetime(2026, 11, 3).astimezone().isoformat(),
+        ),
+    ],
+    ids=["calendar_zone", "calendar_zone_negative_offset", "event_zone_wins", "local_fallback"],
+)
+def test_fetch_events_all_day_starts_at_midnight(monkeypatch, response, expected_start):
+    service = MagicMock()
+    service.events().list().execute.return_value = response
+    monkeypatch.setattr(calendar_client, "_authenticate", lambda config: None)
+    monkeypatch.setattr(calendar_client, "build", lambda *args, **kwargs: service)
+
+    # raises value error if there's more than one event
+    [event] = fetch_events(_CONFIG)
+
+    assert event.start.isoformat() == expected_start
+
+
 def test_fetch_events_pages_through_each_calendar(monkeypatch):
     service = MagicMock()
     service.events().list().execute.side_effect = [
