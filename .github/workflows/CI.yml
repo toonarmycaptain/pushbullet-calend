@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }}${{ matrix.experimental && ' (allowed to fail)' || '' }}
+    runs-on: ubuntu-latest
+    # Pre-release Pythons may lack wheels or break upstream; report, but don't fail the run.
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.14", "3.15"]
+        experimental: [false]
+        include:
+          - python-version: "3.16"
+            experimental: true
+    env:
+      # Overrides .python-version for this job.
+      UV_PYTHON: ${{ matrix.python-version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.3.0
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Run tests
+        run: uv run pytest --cov=src --cov-report=term-missing
