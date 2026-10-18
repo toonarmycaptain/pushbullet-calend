@@ -6,7 +6,13 @@ import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from pushbullet_calend.calendar_client import CalendarEvent, fetch_events_with_retry
+from pushbullet_calend.calendar_client import (
+    CalendarEvent,
+    calendar_name,
+    fetch_events,
+    fetch_events_with_retry,
+    scan_calendars,
+)
 from pushbullet_calend.config import AppConfig, load_config
 from pushbullet_calend.db import EmailNotificationStore, SentStore
 from pushbullet_calend.email_monitor import check_email
@@ -23,9 +29,9 @@ class PendingSms:
     send_time: datetime
 
 
-def _configure_logging() -> None:
+def _configure_logging(level: int = logging.INFO) -> None:
     logging.basicConfig(
-        level=logging.INFO,
+        level=level,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
@@ -413,6 +419,50 @@ def _test_email() -> None:
     print("\nEmail check test complete. No SMS was sent.")
 
 
+def _show_calendars() -> None:
+    """Print every calendar the account can see, and the SMS directives on each."""
+    config = load_config()
+    scanned = scan_calendars(config.google, lookahead_days=config.schedule.lookahead_days)
+    roles = ["owner", "writer", "reader", "freeBusyReader"]
+    # Owned calendars first with your main one on top, then by name.
+    scanned.sort(
+        key=lambda row: (
+            roles.index(row[0]["accessRole"]),
+            not row[0].get("primary", False),
+            calendar_name(row[0]).lower(),
+        )
+    )
+    for calendar, selected, events in scanned:
+        hidden = "  [hidden]" if calendar.get("hidden") else ""
+        print(
+            f"{'*' if selected else ' '} {calendar['accessRole']:<8} {calendar_name(calendar)}"
+            f"  ({calendar['id']}){hidden}"
+        )
+        for event in events:
+            directives = parse_directives(event.description)
+            if directives:
+                start = event.start.astimezone()
+                print(f"      {start:%a %d %b %H:%M}  {event.summary} ({len(directives)} SMS)")
+    print(f"\n* = checked with calendar_ids = {config.google.calendar_ids}")
+
+
+def _list_pending() -> None:
+    """Print the SMS queued from the configured calendars, without sending any."""
+    config = load_config()
+    store = SentStore(config.database.path)
+    events = fetch_events(config.google, lookahead_days=config.schedule.lookahead_days)
+    pending = sorted(_collect_pending(events, store), key=lambda item: item.send_time)
+    store.close()
+    if not pending:
+        print("No SMS queued.")
+        return
+    for item in pending:
+        print(
+            f"{item.send_time.astimezone():%a %d %b %H:%M}  {item.directive.phone_number}"
+            f"  {item.directive.message!r}  from {item.event.summary!r}"
+        )
+
+
 def main() -> None:
     import argparse
 
@@ -432,14 +482,29 @@ def main() -> None:
         action="store_true",
         help="Test email login and search without sending SMS",
     )
+    parser.add_argument(
+        "--calendars",
+        action="store_true",
+        help="List every calendar you can see and the SMS directives on each, without sending",
+    )
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        help="List the SMS queued from the configured calendars, without sending",
+    )
     args = parser.parse_args()
 
-    _configure_logging()
+    # Keep progress logs out of the printed listings.
+    _configure_logging(logging.WARNING if args.calendars or args.list else logging.INFO)
 
     if args.encrypt_password:
         _encrypt_password()
     elif args.test_email:
         _test_email()
+    elif args.calendars:
+        _show_calendars()
+    elif args.list:
+        _list_pending()
     elif args.daemon:
         run(daemon=True)
     else:

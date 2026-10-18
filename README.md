@@ -186,6 +186,19 @@ pkill -f "pushbullet-calend --daemon"
 
 The daemon responds to `SIGINT` and `SIGTERM` for clean shutdown.
 
+### Checking what's tracked
+
+Two read-only commands show what the daemon sees, without sending anything:
+
+```bash
+# Every calendar you can see, marking (*) the ones calendar_ids selects,
+# with the upcoming events on each that have SMS directives
+uv run pushbullet-calend --calendars
+
+# The SMS queued from the selected calendars: send time, recipient, message, event
+uv run pushbullet-calend --list
+```
+
 ### Cron (alternative to daemon)
 
 If you prefer cron over a daemon, messages will be sent within 5 minutes of the scheduled time (depending on your cron interval):

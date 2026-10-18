@@ -408,8 +408,10 @@ def test_run_daemon(monkeypatch, caplog, store, notifications, fetch_results, ex
         (["--daemon"], [call.run(daemon=True)]),
         (["--encrypt-password"], [call.encrypt_password()]),
         (["--test-email"], [call.test_email()]),
+        (["--calendars"], [call.show_calendars()]),
+        (["--list"], [call.list_pending()]),
     ],
-    ids=["once", "daemon", "encrypt_password", "test_email"],
+    ids=["once", "daemon", "encrypt_password", "test_email", "calendars", "list"],
 )
 def test_main_dispatches_on_flags(monkeypatch, argv, expected_calls):
     commands = MagicMock()
@@ -417,6 +419,8 @@ def test_main_dispatches_on_flags(monkeypatch, argv, expected_calls):
     monkeypatch.setattr(main, "run", commands.run)
     monkeypatch.setattr(main, "_encrypt_password", commands.encrypt_password)
     monkeypatch.setattr(main, "_test_email", commands.test_email)
+    monkeypatch.setattr(main, "_show_calendars", commands.show_calendars)
+    monkeypatch.setattr(main, "_list_pending", commands.list_pending)
 
     main.main()
 
@@ -508,5 +512,78 @@ def test_test_email_stops_early(monkeypatch, capsys, config, login_error, expect
     monkeypatch.setattr(main, "load_config", lambda: config)
 
     main._test_email()
+
+    assert expected_output in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "expected_output",
+    [
+        "* owner    Mine  (me@example.com)\n"
+        "  owner    Kids  (kids)\n"
+        "  reader   Holidays  (holidays)  [hidden]\n",
+        "Dentist (1 SMS)",
+    ],
+    ids=["owned_first_main_on_top", "directive_events"],
+)
+def test_show_calendars(monkeypatch, capsys, expected_output):
+    scanned = [
+        (
+            {"id": "holidays", "summary": "Holidays", "accessRole": "reader", "hidden": True},
+            False,
+            [
+                CalendarEvent(
+                    event_id="evt_1",
+                    summary="Dentist",
+                    description="SMS: -30m | +15555550123 | Leave now",
+                    start=datetime(2026, 11, 2, 9, 0, tzinfo=UTC),
+                )
+            ],
+        ),
+        ({"id": "kids", "summary": "Kids", "accessRole": "owner"}, False, []),
+        (
+            {
+                "id": "me@example.com",
+                "summary": "me@example.com",
+                "summaryOverride": "Mine",
+                "accessRole": "owner",
+                "primary": True,
+            },
+            True,
+            [],
+        ),
+    ]
+    monkeypatch.setattr(main, "load_config", lambda: AppConfig())
+    monkeypatch.setattr(main, "scan_calendars", lambda config, **kwargs: scanned)
+
+    main._show_calendars()
+
+    assert expected_output in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "events, expected_output",
+    [
+        ([], "No SMS queued."),
+        (
+            [
+                CalendarEvent(
+                    event_id="evt_1",
+                    summary="Dentist",
+                    description="SMS: -30m | +15555550123 | Leave now",
+                    start=datetime(2026, 11, 2, 9, 0, tzinfo=UTC),
+                )
+            ],
+            "+15555550123  'Leave now'  from 'Dentist'\n",
+        ),
+    ],
+    ids=["nothing_queued", "queued"],
+)
+def test_list_pending(monkeypatch, capsys, tmp_path, events, expected_output):
+    config = AppConfig(database=DatabaseConfig(path=str(tmp_path / "sent.db")))
+    monkeypatch.setattr(main, "load_config", lambda: config)
+    monkeypatch.setattr(main, "fetch_events", lambda config, **kwargs: events)
+
+    main._list_pending()
 
     assert expected_output in capsys.readouterr().out
