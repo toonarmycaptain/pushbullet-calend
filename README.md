@@ -119,7 +119,7 @@ Edit `config.toml` with your credentials:
 
 ```toml
 [google]
-calendar_ids = ["primary"]
+calendar_ids = ["owned"]
 credentials_file = "credentials.json"
 token_file = "token.json"
 
@@ -137,10 +137,16 @@ path = "sent_messages.db"
 
 See the [Email watch](#email-watch) section below for the optional `[email_watch]` config.
 
-To monitor multiple calendars, add their IDs to the list:
+`calendar_ids` chooses which calendars are checked for directives. Three special values save looking up calendar IDs:
+
+- `"owned"` (the default) — every calendar you own, e.g. sub-calendars you made to colour-code family members
+- `"all"` — every calendar in your list, including ones shared with you and subscriptions (free/busy-only calendars are skipped, as they hide event descriptions)
+- `"primary"` — just your main calendar
+
+`"owned"` and `"all"` include calendars hidden from your list, and pick up calendars you add later. Mix them with explicit calendar IDs (found under the calendar's **Settings > Integrate calendar**):
 
 ```toml
-calendar_ids = ["primary", "family@group.calendar.google.com"]
+calendar_ids = ["owned", "family@group.calendar.google.com"]
 ```
 
 Overlapping calendars won't double-text: the same message to the same number at the same time is only sent once, however many calendars or events it comes from (see [Deduplication](#deduplication)).
@@ -323,6 +329,7 @@ This connects to your inbox, searches for matching subjects, and shows what it f
 - **Network outages / server errors (5xx)** — silently skipped and retried on the next cycle. Your internet can be down for hours and messages will send when it comes back. These do not count against the retry limit.
 - **Application errors (4xx)** (bad phone number, invalid API key, etc.) — recorded as failed, retried up to 5 times. You'll get a Pushbullet push notification on your phone about the failure.
 - **If push notifications also fail** — errors are logged to stderr/log file.
+- **A calendar that can't be fetched** — retried once in the same poll. If it still fails, the other calendars carry on, with that calendar's events from its last successful fetch standing in, so texts already scheduled from it still go out. At the end of the poll you get one push notification listing every calendar that failed. Only when every calendar fails (e.g. no network) does the poll count as failed: it's retried with backoff, the already-queued messages are kept, and you get a push notification.
 
 ## Deduplication
 

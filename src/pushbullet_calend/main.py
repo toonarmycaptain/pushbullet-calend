@@ -81,11 +81,13 @@ def _send_due(
     store: SentStore,
     *,
     verify: bool = False,
+    last_known: dict[str, list[CalendarEvent]] | None = None,
 ) -> int:
     """Send any messages whose send_time has arrived. Returns count sent.
 
     If verify is True, re-fetch events from the calendar before sending
-    to confirm they haven't been cancelled or moved.
+    to confirm they haven't been cancelled or moved. A calendar that fails
+    to re-fetch is checked against its *last_known* events instead.
     """
     now = datetime.now(UTC)
     due = [item for item in pending if item.send_time <= now < item.event.start]
@@ -101,6 +103,7 @@ def _send_due(
                 lookahead_days=config.schedule.lookahead_days,
                 retries=config.schedule.fetch_retries,
                 retry_delay_seconds=config.schedule.fetch_retry_delay_seconds,
+                last_known=last_known,
             )
             # Build a set of (event_id, start_iso, description) for quick lookup
             fresh_lookup = {(e.event_id, e.start.isoformat()): e.description for e in fresh_events}
@@ -173,11 +176,15 @@ def _poll(
     config: AppConfig,
     store: SentStore,
     email_store: EmailNotificationStore | None,
+    last_known: dict[str, list[CalendarEvent]] | None = None,
 ) -> list[PendingSms] | None:
     """Fetch calendar events and check email watches. Returns pending SMS list.
 
     Returns None if the calendar fetch failed, so callers can keep a
-    previously collected pending list instead of discarding it.
+    previously collected pending list instead of discarding it. A single
+    calendar that fails falls back to its *last_known* events instead. Email
+    watches are checked either way, and any failures are reported in one alert
+    at the end of the poll.
     """
     pending: list[PendingSms] | None = None
     failed: list[tuple[str, Exception]] = []
@@ -187,6 +194,8 @@ def _poll(
             lookahead_days=config.schedule.lookahead_days,
             retries=config.schedule.fetch_retries,
             retry_delay_seconds=config.schedule.fetch_retry_delay_seconds,
+            last_known=last_known,
+            failed=failed,
         )
         pending = _collect_pending(events, store)
         logger.info(
@@ -259,6 +268,8 @@ def run(config: AppConfig | None = None, *, daemon: bool = False) -> None:
     logger.info("Daemon started, polling every %s", poll_interval)
 
     pending: list[PendingSms] = []
+    # Each calendar's latest events, standing in for a calendar that fails to fetch.
+    last_known: dict[str, list[CalendarEvent]] = {}
     next_poll = datetime.now(UTC)
 
     while running:
@@ -266,7 +277,7 @@ def run(config: AppConfig | None = None, *, daemon: bool = False) -> None:
 
         # Time to re-poll the calendar?
         if now >= next_poll:
-            fresh = _poll(config, store, email_store)
+            fresh = _poll(config, store, email_store, last_known)
             if fresh is not None:
                 pending = fresh
             else:
@@ -277,7 +288,7 @@ def run(config: AppConfig | None = None, *, daemon: bool = False) -> None:
             next_poll = now + poll_interval
 
         # Send anything that's due — verify against live calendar data first
-        sent_count = _send_due(pending, config, store, verify=True)
+        sent_count = _send_due(pending, config, store, verify=True, last_known=last_known)
         if sent_count:
             logger.info("Sent %d messages", sent_count)
             # Re-collect to remove sent items

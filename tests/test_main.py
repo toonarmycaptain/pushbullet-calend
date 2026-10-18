@@ -67,6 +67,32 @@ def test_success_with_no_directives_returns_empty_list(monkeypatch, store, notif
 
 
 @pytest.mark.parametrize(
+    "failures, expected_notifications",
+    [
+        ([], []),
+        ([("Work", OSError("503"))], ["1 calendar(s) failed to fetch"]),
+        (
+            [("Work", OSError("503")), ("Home", OSError("404"))],
+            ["2 calendar(s) failed to fetch"],
+        ),
+    ],
+    ids=["none_failed", "one_failed", "several_failed_one_alert"],
+)
+def test_poll_alerts_once_for_failed_calendars(
+    monkeypatch, store, notifications, failures, expected_notifications
+):
+    def fetch_with_failures(config, *, failed, **kwargs):
+        failed.extend(failures)
+        return []
+
+    monkeypatch.setattr(main, "fetch_events_with_retry", fetch_with_failures)
+
+    _poll(AppConfig(), store, None)
+
+    assert notifications == expected_notifications
+
+
+@pytest.mark.parametrize(
     "description, expected_send_times",
     [
         ("no directives here", []),

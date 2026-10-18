@@ -1,5 +1,7 @@
 [google]
-calendar_ids = ["primary"]
+# "owned" = every calendar you own, "all" = every calendar in your list, "primary" = your
+# main calendar. Mix with explicit IDs, e.g. ["owned", "family@group.calendar.google.com"].
+calendar_ids = ["owned"]
 credentials_file = "credentials.json"
 token_file = "token.json"
 

@@ -14,7 +14,7 @@ _DEFAULT_CONFIG_PATH = Path("config.toml")
 
 @dataclass
 class GoogleConfig:
-    calendar_ids: list[str] = field(default_factory=lambda: ["primary"])
+    calendar_ids: list[str] = field(default_factory=lambda: ["owned"])
     credentials_file: str = "credentials.json"
     token_file: str = "token.json"
 
