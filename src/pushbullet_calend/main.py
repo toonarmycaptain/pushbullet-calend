@@ -179,6 +179,8 @@ def _poll(
     Returns None if the calendar fetch failed, so callers can keep a
     previously collected pending list instead of discarding it.
     """
+    pending: list[PendingSms] | None = None
+    failed: list[tuple[str, Exception]] = []
     try:
         events = fetch_events_with_retry(
             config.google,
@@ -194,12 +196,6 @@ def _poll(
         )
     except Exception:
         logger.exception("Failed to fetch calendar events")
-        notify_failure(
-            config.pushbullet,
-            "Calendar fetch failed",
-            "Could not retrieve events from Google Calendar. Check logs.",
-        )
-        return None
     # Check email watches
     if email_store is not None:
         try:
@@ -209,6 +205,18 @@ def _poll(
         except Exception:
             logger.exception("Failed to check email")
 
+    if pending is None:
+        notify_failure(
+            config.pushbullet,
+            "Calendar fetch failed",
+            "Could not retrieve events from Google Calendar. Check logs.",
+        )
+    elif failed:
+        notify_failure(
+            config.pushbullet,
+            f"{len(failed)} calendar(s) failed to fetch",
+            "\n".join(f"{name}: {exc}" for name, exc in failed),
+        )
     return pending
 
 

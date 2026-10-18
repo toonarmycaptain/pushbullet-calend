@@ -280,6 +280,7 @@ def test_poll_checks_email_without_losing_calendar_results(
             0,
         ),
         (OSError("down"), False, 0, 0),
+        (OSError("down"), True, 0, 1),
         (
             [
                 CalendarEvent(
@@ -294,7 +295,7 @@ def test_poll_checks_email_without_losing_calendar_results(
             1,
         ),
     ],
-    ids=["sends_due", "fetch_fails", "with_email_watch"],
+    ids=["sends_due", "fetch_fails", "fetch_fails_still_checks_email", "with_email_watch"],
 )
 def test_run_once(
     monkeypatch,
