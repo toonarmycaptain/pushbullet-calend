@@ -4,7 +4,7 @@ import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import Integer, String, UniqueConstraint, create_engine, select
+from sqlalchemy import Integer, String, UniqueConstraint, create_engine, inspect, select, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
 _MAX_RETRIES = 5
@@ -52,11 +52,18 @@ class SentMessage(Base):
     sent_at: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # When the text was due (UTC), so the same text isn't sent again from another event.
+    send_time: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 def message_hash(text: str) -> str:
     """Return a short hash of *text* for dedup purposes."""
     return hashlib.sha256(text.encode()).hexdigest()[:16]
+
+
+def _utc_iso(moment: datetime) -> str:
+    """Return *moment* as a UTC ISO string, so equal instants compare equal."""
+    return moment.astimezone(UTC).isoformat()
 
 
 class SentStore:
@@ -66,6 +73,11 @@ class SentStore:
         self._engine = create_engine(f"sqlite:///{db_path}")
         self._max_retries = max_retries
         Base.metadata.create_all(self._engine)
+        # Databases from before send_time existed get the column added in place.
+        columns = {c["name"] for c in inspect(self._engine).get_columns("sent_messages")}
+        if "send_time" not in columns:
+            with self._engine.begin() as conn:
+                conn.execute(text("ALTER TABLE sent_messages ADD COLUMN send_time VARCHAR"))
 
     def close(self) -> None:
         self._engine.dispose()
@@ -93,13 +105,29 @@ class SentStore:
         instance_start: str,
         phone_number: str,
         message: str,
+        *,
+        send_time: datetime | None = None,
     ) -> bool:
         """Return True if this message should be sent.
 
         True when: no record exists, or status is 'failed' with retries remaining.
-        False when: status is 'sent', or retries are exhausted.
+        False when: status is 'sent', or retries are exhausted. Given *send_time*,
+        also False when the same message already went to the same number for that
+        send time from any event, so copies of an event never text twice.
         """
         with Session(self._engine) as session:
+            if (
+                send_time is not None
+                and session.execute(
+                    select(SentMessage.id).where(
+                        SentMessage.phone_number == phone_number,
+                        SentMessage.message_hash == message_hash(message),
+                        SentMessage.send_time == _utc_iso(send_time),
+                        SentMessage.status == "sent",
+                    )
+                ).first()
+            ):
+                return False
             row = self._find(
                 session,
                 event_id,
@@ -119,9 +147,12 @@ class SentStore:
         instance_start: str,
         phone_number: str,
         message: str,
+        *,
+        send_time: datetime | None = None,
     ) -> None:
         """Record a successful send."""
         mh = message_hash(message)
+        due = _utc_iso(send_time) if send_time is not None else None
         with Session(self._engine) as session:
             row = self._find(session, event_id, instance_start, phone_number, mh)
             if row is None:
@@ -133,11 +164,13 @@ class SentStore:
                         message_hash=mh,
                         sent_at=datetime.now(UTC).isoformat(),
                         status="sent",
+                        send_time=due,
                     )
                 )
             else:
                 row.status = "sent"
                 row.sent_at = datetime.now(UTC).isoformat()
+                row.send_time = due
             session.commit()
 
     def record_failure(

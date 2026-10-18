@@ -34,8 +34,13 @@ def _collect_pending(
     events: list[CalendarEvent],
     store: SentStore,
 ) -> list[PendingSms]:
-    """Build a list of SMS messages that are pending (not yet sent, not expired)."""
+    """Build a list of SMS messages that are pending (not yet sent, not expired).
+
+    The same message to the same number at the same send time is queued once,
+    however many events (or copies of one event) ask for it.
+    """
     pending: list[PendingSms] = []
+    queued: set[tuple[str, str, datetime]] = set()
     for event in events:
         directives = parse_directives(event.description)
         if directives:
@@ -52,14 +57,20 @@ def _collect_pending(
             if send_time >= event.start:
                 continue
 
+            key = (directive.phone_number, directive.message, send_time)
+            if key in queued:
+                continue
+
             if not store.should_send(
                 event.event_id,
                 instance_start,
                 directive.phone_number,
                 directive.message,
+                send_time=send_time,
             ):
                 continue
 
+            queued.add(key)
             pending.append(PendingSms(event=event, directive=directive, send_time=send_time))
     return pending
 
@@ -133,6 +144,7 @@ def _send_due(
                 instance_start,
                 item.directive.phone_number,
                 item.directive.message,
+                send_time=item.send_time,
             )
             sent_count += 1
         except TransientError as exc:
@@ -269,6 +281,7 @@ def run(config: AppConfig | None = None, *, daemon: bool = False) -> None:
                     p.event.start.isoformat(),
                     p.directive.phone_number,
                     p.directive.message,
+                    send_time=p.send_time,
                 )
             ]
 

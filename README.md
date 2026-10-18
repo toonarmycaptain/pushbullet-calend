@@ -143,6 +143,8 @@ To monitor multiple calendars, add their IDs to the list:
 calendar_ids = ["primary", "family@group.calendar.google.com"]
 ```
 
+Overlapping calendars won't double-text: the same message to the same number at the same time is only sent once, however many calendars or events it comes from (see [Deduplication](#deduplication)).
+
 ### 5. First run (OAuth authorization)
 
 ```bash
@@ -326,10 +328,13 @@ This connects to your inbox, searches for matching subjects, and shows what it f
 
 Messages are tracked in a local SQLite database to prevent duplicates. The dedup key is the combination of event ID, occurrence time, phone number, and a hash of the message text.
 
+On top of that, the same message to the same number at the same send time is only ever sent once, however many events it comes from — an invite that's on several of your calendars, an event copied to another calendar, or two events that happen to schedule the identical text for the same moment.
+
 This means:
 - The same recurring event won't send the same message twice for the same occurrence
 - If you edit the message text in the event description, it'll send the updated version
 - Different phone numbers in the same event each get their own message
+- Copies of an event, on one calendar or several, send each text once
 
 ## Disclaimer
 

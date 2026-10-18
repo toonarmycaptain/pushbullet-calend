@@ -3,7 +3,7 @@
 import imaplib
 import logging
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from unittest.mock import MagicMock, call
 
 import pytest
@@ -98,6 +98,74 @@ def test_collect_pending_skips_already_sent(store):
     store.record_sent("evt_1", "2026-11-02T09:00:00+00:00", "+15555550123", "Leave now")
 
     assert _collect_pending([event], store) == []
+
+
+@pytest.mark.parametrize(
+    "second_event, expected_event_ids",
+    [
+        (
+            CalendarEvent(
+                event_id="evt_2",
+                summary="Dentist (copy)",
+                description="SMS: -30m | +15555550123 | Leave now",
+                start=datetime(2026, 11, 2, 9, 0, tzinfo=UTC),
+            ),
+            ["evt_1"],
+        ),
+        (
+            CalendarEvent(
+                event_id="evt_2",
+                summary="Checkup",
+                description="SMS: -1h | +15555550123 | Leave now",
+                start=datetime(2026, 11, 2, 9, 30, tzinfo=UTC),
+            ),
+            ["evt_1"],
+        ),
+        (
+            CalendarEvent(
+                event_id="evt_2",
+                summary="Dentist (Chicago)",
+                description="SMS: -30m | +15555550123 | Leave now",
+                start=datetime(2026, 11, 2, 3, 0, tzinfo=timezone(timedelta(hours=-6))),
+            ),
+            ["evt_1"],
+        ),
+        (
+            CalendarEvent(
+                event_id="evt_2",
+                summary="Dentist (other number)",
+                description="SMS: -30m | +15555550199 | Leave now",
+                start=datetime(2026, 11, 2, 9, 0, tzinfo=UTC),
+            ),
+            ["evt_1", "evt_2"],
+        ),
+    ],
+    ids=["copied_event", "other_event_same_send_time", "same_instant_other_zone", "other_number"],
+)
+def test_collect_pending_queues_identical_texts_once(store, second_event, expected_event_ids):
+    event = CalendarEvent(
+        event_id="evt_1",
+        summary="Dentist",
+        description="SMS: -30m | +15555550123 | Leave now",
+        start=datetime(2026, 11, 2, 9, 0, tzinfo=UTC),
+    )
+
+    pending = _collect_pending([event, second_event], store)
+
+    assert [p.event.event_id for p in pending] == expected_event_ids
+
+
+def test_text_sent_from_one_event_is_not_sent_again_from_a_copy(monkeypatch, store):
+    event = CalendarEvent(
+        event_id="evt_1",
+        summary="Dentist",
+        description="SMS: -30m | +15555550123 | Leave now",
+        start=datetime.now(UTC) + timedelta(minutes=10),
+    )
+    monkeypatch.setattr(main, "send_sms", MagicMock())
+    _send_due(_collect_pending([event], store), AppConfig(), store)
+
+    assert _collect_pending([replace(event, event_id="evt_2")], store) == []
 
 
 @pytest.mark.parametrize(
