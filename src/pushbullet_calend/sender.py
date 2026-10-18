@@ -121,5 +121,5 @@ def notify_failure(
             json=payload,
         )
         logger.info("Failure notification sent: %s", title)
-    except (TransientError, PermanentError):
+    except TransientError, PermanentError:
         logger.exception("Could not send failure notification: %s — %s", title, body)

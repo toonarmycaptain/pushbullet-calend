@@ -1,10 +1,9 @@
 """Load application configuration from TOML."""
 
 import logging
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-
-import tomllib
 
 from pushbullet_calend.crypto import decrypt
 
