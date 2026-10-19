@@ -2,6 +2,7 @@
 
 import logging
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -53,6 +54,15 @@ def _authenticate(config: GoogleConfig) -> Credentials:
 
     token_path.write_text(creds.to_json())
     return creds
+
+
+def _build_service(creds: Credentials) -> Resource:
+    """Build a Calendar API client with its own connection.
+
+    A client's connection isn't thread-safe, so each concurrent fetch needs its own.
+    The API description ships with the library, so there's nothing to cache.
+    """
+    return build("calendar", "v3", credentials=creds, cache_discovery=False)
 
 
 def _event_start(start: dict[str, str], calendar_tz: str | None) -> datetime:
@@ -116,10 +126,11 @@ def _resolve_calendar_ids(service: Resource, calendar_ids: list[str]) -> list[st
 
 
 def _fetch_calendar(
-    service: Resource, calendar_id: str, time_min: str, time_max: str
+    creds: Credentials, calendar_id: str, time_min: str, time_max: str
 ) -> list[CalendarEvent]:
     """Fetch one calendar's events between time_min and time_max."""
     logger.info("Fetching events from calendar %s", calendar_id)
+    service = _build_service(creds)
     events: list[CalendarEvent] = []
     page_token = None
     while True:
@@ -149,6 +160,17 @@ def _fetch_calendar(
             return events
 
 
+def _fetch_calendars(
+    creds: Credentials, calendar_ids: list[str], time_min: str, time_max: str
+) -> dict[str, Future[list[CalendarEvent]]]:
+    """Fetch every calendar at once; each future holds that calendar's events or its error."""
+    with ThreadPoolExecutor(max_workers=max(len(calendar_ids), 1)) as pool:
+        return {
+            calendar_id: pool.submit(_fetch_calendar, creds, calendar_id, time_min, time_max)
+            for calendar_id in calendar_ids
+        }
+
+
 def fetch_events(
     config: GoogleConfig,
     *,
@@ -164,7 +186,7 @@ def fetch_events(
     to collect (calendar name, error) for each calendar that was skipped.
     """
     creds = _authenticate(config)
-    service = build("calendar", "v3", credentials=creds)
+    service = _build_service(creds)
 
     now = datetime.now(UTC)
     time_min = now.isoformat()
@@ -177,9 +199,9 @@ def fetch_events(
     # Try every calendar, then retry once whichever failed.
     for _ in range(2):
         errors = {}
-        for calendar_id in to_fetch:
+        for calendar_id, fetch in _fetch_calendars(creds, to_fetch, time_min, time_max).items():
             try:
-                fetched[calendar_id] = _fetch_calendar(service, calendar_id, time_min, time_max)
+                fetched[calendar_id] = fetch.result()
             except Exception as exc:
                 errors[calendar_id] = exc
         to_fetch = list(errors)
@@ -222,23 +244,24 @@ def scan_calendars(
     Returns (calendar, selected by config.calendar_ids, events) for each calendar.
     """
     creds = _authenticate(config)
-    service = build("calendar", "v3", credentials=creds)
+    service = _build_service(creds)
 
     now = datetime.now(UTC)
     time_min = now.isoformat()
     time_max = (now + timedelta(days=lookahead_days)).isoformat()
 
     selected = set(_resolve_calendar_ids(service, config.calendar_ids))
+    calendars = _list_calendars(service)
+    readable = [c["id"] for c in calendars if c["accessRole"] in _CALENDAR_SELECTORS["all"]]
+    fetches = _fetch_calendars(creds, readable, time_min, time_max)
     return [
         (
             calendar,
             calendar["id"] in selected
             or ("primary" in selected and calendar.get("primary", False)),
-            _fetch_calendar(service, calendar["id"], time_min, time_max)
-            if calendar["accessRole"] in _CALENDAR_SELECTORS["all"]
-            else [],
+            fetches[calendar["id"]].result() if calendar["id"] in fetches else [],
         )
-        for calendar in _list_calendars(service)
+        for calendar in calendars
     ]
 
 

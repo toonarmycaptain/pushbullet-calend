@@ -178,14 +178,25 @@ def test_fetch_events_all_day_starts_at_midnight(monkeypatch, response, expected
 
 def test_fetch_events_pages_through_each_calendar(monkeypatch):
     service = MagicMock()
-    service.events().list().execute.side_effect = [
-        {
-            "items": [{"id": "work_1", "start": {"dateTime": "2026-11-02T09:00:00+10:00"}}],
-            "nextPageToken": "p2",
-        },
-        {"items": [{"id": "work_2", "start": {"dateTime": "2026-11-02T09:00:00+10:00"}}]},
-        {"items": [{"id": "home_1", "start": {"dateTime": "2026-11-02T09:00:00+10:00"}}]},
-    ]
+    pages = {
+        "work": iter(
+            [
+                {
+                    "items": [
+                        {"id": "work_1", "start": {"dateTime": "2026-11-02T09:00:00+10:00"}}
+                    ],
+                    "nextPageToken": "p2",
+                },
+                {"items": [{"id": "work_2", "start": {"dateTime": "2026-11-02T09:00:00+10:00"}}]},
+            ]
+        ),
+        "home": iter(
+            [{"items": [{"id": "home_1", "start": {"dateTime": "2026-11-02T09:00:00+10:00"}}]}]
+        ),
+    }
+    service.events().list.side_effect = lambda calendarId, **kwargs: MagicMock(
+        execute=MagicMock(side_effect=pages[calendarId])
+    )
     monkeypatch.setattr(calendar_client, "_authenticate", lambda config: None)
     monkeypatch.setattr(calendar_client, "build", lambda *args, **kwargs: service)
 
@@ -198,29 +209,51 @@ def test_fetch_events_pages_through_each_calendar(monkeypatch):
     "responses, last_known, expected_ids",
     [
         (
-            [
-                OSError("503"),
-                {"items": [{"id": "home_1", "start": {"dateTime": "2026-11-02T09:00:00+10:00"}}]},
-                {"items": [{"id": "work_1", "start": {"dateTime": "2026-11-02T09:00:00+10:00"}}]},
-            ],
+            {
+                "work": [
+                    OSError("503"),
+                    {
+                        "items": [
+                            {"id": "work_1", "start": {"dateTime": "2026-11-02T09:00:00+10:00"}}
+                        ]
+                    },
+                ],
+                "home": [
+                    {
+                        "items": [
+                            {"id": "home_1", "start": {"dateTime": "2026-11-02T09:00:00+10:00"}}
+                        ]
+                    }
+                ],
+            },
             {},
             ["work_1", "home_1"],
         ),
         (
-            [
-                OSError("503"),
-                {"items": [{"id": "home_1", "start": {"dateTime": "2026-11-02T09:00:00+10:00"}}]},
-                OSError("503"),
-            ],
+            {
+                "work": [OSError("503"), OSError("503")],
+                "home": [
+                    {
+                        "items": [
+                            {"id": "home_1", "start": {"dateTime": "2026-11-02T09:00:00+10:00"}}
+                        ]
+                    }
+                ],
+            },
             {},
             ["home_1"],
         ),
         (
-            [
-                OSError("503"),
-                {"items": [{"id": "home_1", "start": {"dateTime": "2026-11-02T09:00:00+10:00"}}]},
-                OSError("503"),
-            ],
+            {
+                "work": [OSError("503"), OSError("503")],
+                "home": [
+                    {
+                        "items": [
+                            {"id": "home_1", "start": {"dateTime": "2026-11-02T09:00:00+10:00"}}
+                        ]
+                    }
+                ],
+            },
             {
                 "work": [
                     CalendarEvent(
@@ -240,7 +273,10 @@ def test_fetch_events_retries_a_failing_calendar_once(
     monkeypatch, responses, last_known, expected_ids
 ):
     service = MagicMock()
-    service.events().list().execute.side_effect = responses
+    pages = {calendar: iter(results) for calendar, results in responses.items()}
+    service.events().list.side_effect = lambda calendarId, **kwargs: MagicMock(
+        execute=MagicMock(side_effect=pages[calendarId])
+    )
     monkeypatch.setattr(calendar_client, "_authenticate", lambda config: None)
     monkeypatch.setattr(calendar_client, "build", lambda *args, **kwargs: service)
 
@@ -251,10 +287,17 @@ def test_fetch_events_retries_a_failing_calendar_once(
 
 def test_fetch_events_remembers_each_calendars_events(monkeypatch):
     service = MagicMock()
-    service.events().list().execute.side_effect = [
-        {"items": [{"id": "work_1", "start": {"dateTime": "2026-11-02T09:00:00+10:00"}}]},
-        {"items": [{"id": "home_1", "start": {"dateTime": "2026-11-02T09:00:00+10:00"}}]},
-    ]
+    pages = {
+        "work": iter(
+            [{"items": [{"id": "work_1", "start": {"dateTime": "2026-11-02T09:00:00+10:00"}}]}]
+        ),
+        "home": iter(
+            [{"items": [{"id": "home_1", "start": {"dateTime": "2026-11-02T09:00:00+10:00"}}]}]
+        ),
+    }
+    service.events().list.side_effect = lambda calendarId, **kwargs: MagicMock(
+        execute=MagicMock(side_effect=pages[calendarId])
+    )
     monkeypatch.setattr(calendar_client, "_authenticate", lambda config: None)
     monkeypatch.setattr(calendar_client, "build", lambda *args, **kwargs: service)
     last_known = {}
@@ -297,13 +340,16 @@ def test_fetch_events_reports_calendars_that_fail_their_retry(
 ):
     service = MagicMock()
     service.calendarList().list().execute.side_effect = [calendar_list]
-    service.events().list().execute.side_effect = [
-        OSError("503"),
-        OSError("503"),
-        {"items": [{"id": "home_1", "start": {"dateTime": "2026-11-02T09:00:00+10:00"}}]},
-        OSError("503 again"),
-        OSError("503 again"),
-    ]
+    pages = {
+        "primary": iter([OSError("503"), OSError("503 again")]),
+        "kids": iter([OSError("503"), OSError("503 again")]),
+        "home": iter(
+            [{"items": [{"id": "home_1", "start": {"dateTime": "2026-11-02T09:00:00+10:00"}}]}]
+        ),
+    }
+    service.events().list.side_effect = lambda calendarId, **kwargs: MagicMock(
+        execute=MagicMock(side_effect=pages[calendarId])
+    )
     monkeypatch.setattr(calendar_client, "_authenticate", lambda config: None)
     monkeypatch.setattr(calendar_client, "build", lambda *args, **kwargs: service)
     failed = []
@@ -325,15 +371,24 @@ def test_fetch_events_raises_when_every_calendar_fails(monkeypatch):
 
 def test_fetch_events_keeps_one_copy_of_an_event_on_several_calendars(monkeypatch):
     service = MagicMock()
-    service.events().list().execute.side_effect = [
-        {
-            "items": [
-                {"id": "dr_appt", "start": {"dateTime": "2026-10-22T15:45:00-05:00"}},
-                {"id": "play", "start": {"dateTime": "2026-10-18T19:00:00-05:00"}},
+    pages = {
+        "primary": iter(
+            [
+                {
+                    "items": [
+                        {"id": "dr_appt", "start": {"dateTime": "2026-10-22T15:45:00-05:00"}},
+                        {"id": "play", "start": {"dateTime": "2026-10-18T19:00:00-05:00"}},
+                    ]
+                }
             ]
-        },
-        {"items": [{"id": "dr_appt", "start": {"dateTime": "2026-10-22T15:45:00-05:00"}}]},
-    ]
+        ),
+        "both": iter(
+            [{"items": [{"id": "dr_appt", "start": {"dateTime": "2026-10-22T15:45:00-05:00"}}]}]
+        ),
+    }
+    service.events().list.side_effect = lambda calendarId, **kwargs: MagicMock(
+        execute=MagicMock(side_effect=pages[calendarId])
+    )
     monkeypatch.setattr(calendar_client, "_authenticate", lambda config: None)
     monkeypatch.setattr(calendar_client, "build", lambda *args, **kwargs: service)
 
@@ -378,7 +433,10 @@ def test_fetch_events_expands_calendar_selectors(monkeypatch, calendar_ids, expe
 
     fetch_events(GoogleConfig(calendar_ids=calendar_ids))
 
-    assert [c.kwargs["calendarId"] for c in list_events.call_args_list] == expected_fetched
+    # Calendars are fetched concurrently, so they can be requested in any order.
+    assert sorted(c.kwargs["calendarId"] for c in list_events.call_args_list) == sorted(
+        expected_fetched
+    )
 
 
 @pytest.mark.parametrize(
