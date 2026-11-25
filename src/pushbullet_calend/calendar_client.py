@@ -109,9 +109,10 @@ def _calendar_names(service: Resource) -> dict[str, str]:
 
 
 def _resolve_calendar_ids(service: Resource, calendar_ids: list[str]) -> list[str]:
-    """Expand "owned" and "all" entries into the IDs of the calendars they select.
+    """Expand "owned", "writable" and "all" entries into the IDs of the calendars they select.
 
-    Other entries (explicit IDs, "primary") pass through, and duplicates are dropped.
+    Selectors skip calendars hidden from the user's list. Other entries (explicit IDs,
+    "primary") pass through, hidden or not, and duplicates are dropped.
     """
     if not _CALENDAR_SELECTORS.keys() & set(calendar_ids):
         return calendar_ids
@@ -122,7 +123,9 @@ def _resolve_calendar_ids(service: Resource, calendar_ids: list[str]) -> list[st
         if roles is None:
             resolved.append(entry)
         else:
-            resolved.extend(c["id"] for c in calendars if c["accessRole"] in roles)
+            resolved.extend(
+                c["id"] for c in calendars if c["accessRole"] in roles and not c.get("hidden")
+            )
     return list(dict.fromkeys(resolved))
 
 

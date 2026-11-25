@@ -1,5 +1,6 @@
 [google]
 # "owned" = every calendar you own, "writable" = every calendar you own or can edit,
+# "all" = every calendar in your list (all three skip calendars hidden from your list),
 # "primary" = your main calendar. Mix with explicit IDs, e.g. ["writable", "club@group.calendar.google.com"].
 calendar_ids = ["owned"]
 credentials_file = "credentials.json"

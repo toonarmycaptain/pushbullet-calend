@@ -144,11 +144,13 @@ See the [Email watch](#email-watch) section below for the optional `[email_watch
 - `"all"` — every calendar in your list, including ones shared with you and subscriptions (free/busy-only calendars are skipped, as they hide event descriptions)
 - `"primary"` — just your main calendar
 
-`"owned"` and `"all"` include calendars hidden from your list, and pick up calendars you add later. Mix them with explicit calendar IDs (found under the calendar's **Settings > Integrate calendar**):
+`"owned"`, `"writable"` and `"all"` skip calendars hidden from your list, and pick up calendars you add later. Mix them with explicit calendar IDs (found under the calendar's **Settings > Integrate calendar**), e.g. to check a club calendar you can only view, whose organisers write directives into its events:
 
 ```toml
 calendar_ids = ["writable", "club@group.calendar.google.com"]
 ```
+
+An explicit ID is checked even if the calendar is hidden from your list.
 
 Overlapping calendars won't double-text: the same message to the same number at the same time is only sent once, however many calendars or events it comes from (see [Deduplication](#deduplication)).
 

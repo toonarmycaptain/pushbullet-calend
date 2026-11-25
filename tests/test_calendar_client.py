@@ -405,6 +405,7 @@ def test_fetch_events_keeps_one_copy_of_an_event_on_several_calendars(monkeypatc
         (["writable"], ["me@example.com", "kids", "shared@example.com"]),
         (["all"], ["me@example.com", "kids", "shared@example.com", "holidays"]),
         (["owned", "shared@example.com"], ["me@example.com", "kids", "shared@example.com"]),
+        (["owned", "archived"], ["me@example.com", "kids", "archived"]),
         (["kids", "all"], ["kids", "me@example.com", "shared@example.com", "holidays"]),
     ],
     ids=[
@@ -413,6 +414,7 @@ def test_fetch_events_keeps_one_copy_of_an_event_on_several_calendars(monkeypatc
         "writable",
         "all_skips_free_busy",
         "owned_plus_explicit",
+        "explicit_hidden",
         "deduped",
     ],
 )
@@ -431,6 +433,7 @@ def test_fetch_events_expands_calendar_selectors(monkeypatch, calendar_ids, expe
             "items": [
                 {"id": "holidays", "accessRole": "reader"},
                 {"id": "busy@example.com", "accessRole": "freeBusyReader"},
+                {"id": "archived", "accessRole": "owner", "hidden": True},
             ]
         },
     ]
