@@ -402,11 +402,19 @@ def test_fetch_events_keeps_one_copy_of_an_event_on_several_calendars(monkeypatc
     [
         (["primary", "work"], ["primary", "work"]),
         (["owned"], ["me@example.com", "kids"]),
+        (["writable"], ["me@example.com", "kids", "shared@example.com"]),
         (["all"], ["me@example.com", "kids", "shared@example.com", "holidays"]),
         (["owned", "shared@example.com"], ["me@example.com", "kids", "shared@example.com"]),
         (["kids", "all"], ["kids", "me@example.com", "shared@example.com", "holidays"]),
     ],
-    ids=["explicit_ids", "owned", "all_skips_free_busy", "owned_plus_explicit", "deduped"],
+    ids=[
+        "explicit_ids",
+        "owned",
+        "writable",
+        "all_skips_free_busy",
+        "owned_plus_explicit",
+        "deduped",
+    ],
 )
 def test_fetch_events_expands_calendar_selectors(monkeypatch, calendar_ids, expected_fetched):
     service = MagicMock()

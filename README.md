@@ -137,16 +137,17 @@ path = "sent_messages.db"
 
 See the [Email watch](#email-watch) section below for the optional `[email_watch]` config.
 
-`calendar_ids` chooses which calendars are checked for directives. Three special values save looking up calendar IDs:
+`calendar_ids` chooses which calendars are checked for directives. Four special values save looking up calendar IDs:
 
 - `"owned"` (the default) — every calendar you own, e.g. sub-calendars you made to colour-code family members
+- `"writable"` — every calendar you own or can edit, i.e. `"owned"` plus calendars shared with you with permission to make changes
 - `"all"` — every calendar in your list, including ones shared with you and subscriptions (free/busy-only calendars are skipped, as they hide event descriptions)
 - `"primary"` — just your main calendar
 
 `"owned"` and `"all"` include calendars hidden from your list, and pick up calendars you add later. Mix them with explicit calendar IDs (found under the calendar's **Settings > Integrate calendar**):
 
 ```toml
-calendar_ids = ["owned", "family@group.calendar.google.com"]
+calendar_ids = ["writable", "club@group.calendar.google.com"]
 ```
 
 Overlapping calendars won't double-text: the same message to the same number at the same time is only sent once, however many calendars or events it comes from (see [Deduplication](#deduplication)).

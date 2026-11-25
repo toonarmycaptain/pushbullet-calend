@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 # Free/busy-only calendars hide event descriptions, so they can't hold SMS directives.
 _CALENDAR_SELECTORS: dict[str, set[str]] = {
     "owned": {"owner"},
+    "writable": {"owner", "writer"},
     "all": {"owner", "writer", "reader"},
 }
 
